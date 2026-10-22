@@ -86,7 +86,7 @@ def publish(branch, files, keep_prefix_count, msg):
         p = os.path.join(wt, old)
         shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
     sh("git", "-C", wt, "add", "-A")
-    sh("git", "-C", wt, "commit", "-q", "-m", msg)
+    sh("git", "-C", wt, "commit", "-q", "--allow-empty", "-m", msg)
     for _ in range(6):
         if subprocess.run(["git", "-C", wt, "push", "origin", branch]).returncode == 0:
             return
