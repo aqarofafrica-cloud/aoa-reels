@@ -1,0 +1,13 @@
+# AQAR OF AFRICA - music rotation (Pixabay Content License, free commercial use, no attribution required)
+# One track per line: name|url . The workflow picks track number (run_number mod N), so a track repeats only every N videos.
+luxury-life|https://cdn.pixabay.com/audio/2026/10/14/audio_4224b8e704.mp3
+music-promotion|https://cdn.pixabay.com/audio/2026/04/10/audio_1c3b9bac1b.mp3
+summertime|https://cdn.pixabay.com/audio/2026/10/14/audio_c8515ec9af.mp3
+eona-ambient-pop|https://cdn.pixabay.com/audio/2025/05/29/audio_b92a610839.mp3
+commercial-background|https://cdn.pixabay.com/audio/2026/10/14/audio_e534594fd1.mp3
+chill-upbeat-travel|https://cdn.pixabay.com/audio/2024/04/14/audio_5d6668b1f0.mp3
+stylish-funk|https://cdn.pixabay.com/audio/2026/10/14/audio_1106942755.mp3
+creative-showreel|https://cdn.pixabay.com/audio/2024/09/16/audio_a10608d6cd.mp3
+water-afropop|https://cdn.pixabay.com/audio/2025/12/11/audio_249561b3fc.mp3
+background-synthwave|https://cdn.pixabay.com/audio/2026/10/10/audio_5ee48dc179.mp3
+vlog-chill-hiphop|https://cdn.pixabay.com/audio/2026/02/12/audio_ef715196dc.mp3
