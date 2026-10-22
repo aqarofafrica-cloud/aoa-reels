@@ -93,7 +93,13 @@ def main():
             os.remove(os.path.join("vid", old))
         sh("git", "-C", "vid", "add", "-A")
         sh("git", "-C", "vid", "commit", "-q", "-m", f"reel {job}")
-        sh("git", "-C", "vid", "push", "-f", "origin", "videos")
+        for attempt in range(6):
+            if subprocess.run(["git", "-C", "vid", "push", "origin", "videos"]).returncode == 0:
+                break
+            time.sleep(5)
+            subprocess.run(["git", "-C", "vid", "pull", "--rebase", "origin", "videos"])
+        else:
+            raise RuntimeError("could not push video")
         video_url = f"https://raw.githubusercontent.com/{REPO}/videos/{job}.mp4"
         wait = target - time.time()
         if wait > 0:
