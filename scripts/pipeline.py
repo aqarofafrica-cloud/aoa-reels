@@ -87,7 +87,8 @@ def main():
             sh("git", "worktree", "add", "--detach", "vid")
             sh("git", "-C", "vid", "checkout", "--orphan", "videos")
             subprocess.run(["git", "-C", "vid", "rm", "-rf", "--quiet", "."])
-        sh("cp", out, f"vid/{job}.mp4")
+        fname = time.strftime("%Y%m%d%H%M%S") + "-" + job + ".mp4"
+        sh("cp", out, f"vid/{fname}")
         vids = sorted([f for f in os.listdir("vid") if f.endswith(".mp4")], key=lambda f: f)
         for old in vids[:-30]:
             os.remove(os.path.join("vid", old))
@@ -100,7 +101,7 @@ def main():
             subprocess.run(["git", "-C", "vid", "pull", "--rebase", "origin", "videos"])
         else:
             raise RuntimeError("could not push video")
-        video_url = f"https://raw.githubusercontent.com/{REPO}/videos/{job}.mp4"
+        video_url = f"https://raw.githubusercontent.com/{REPO}/videos/{fname}"
         wait = target - time.time()
         if wait > 0:
             wait = min(wait, 28 * 60)
