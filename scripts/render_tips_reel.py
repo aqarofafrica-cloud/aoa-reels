@@ -145,6 +145,22 @@ def estimate_words(text, t0=0.0):
 
 
 # ---------------------------------------------------------------- visuals
+PERSON = re.compile(r"\b(man|woman|men|women|guy|lady|businessman|businesswoman|person|agent|realtor|consultant|advisor|expert|buyer|seller)\b", re.I)
+
+
+def match_gender(query, gender):
+    """Keep the person on screen consistent with the voice we hear (male voice -> man, female voice -> woman)."""
+    if not query or gender not in ("male", "female") or not PERSON.search(query):
+        return query
+    m = gender == "male"
+    q = re.sub(r"\bwom(a|e)n\b", "man" if m else "woman", query, flags=re.I) if m else re.sub(r"\bm(a|e)n\b", "woman", query, flags=re.I)
+    q = re.sub(r"\bbusiness(wo)?man\b", "businessman" if m else "businesswoman", q, flags=re.I)
+    q = re.sub(r"\b(lady|guy)\b", "man" if m else "woman", q, flags=re.I)
+    if not re.search(r"\b(man|woman|businessman|businesswoman)\b", q, re.I):
+        q = ("man " if m else "woman ") + q
+    return q
+
+
 def pixabay_pick(query, key, used, want, workdir, idx):
     """Return (path, kind) for a stock visual, preferring portrait video long enough."""
     if not key or not query:
@@ -336,7 +352,9 @@ def main():
     clips = []
     for i, s in enumerate(scenes):
         got = None
-        for q in [s.get("visual"), s.get("visual_alt")] + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
+        g = (voices.get(s.get("speaker") or "narrator") or {}).get("gender") if mode == "dialogue" else None
+        qs = [match_gender(s.get("visual"), g), match_gender(s.get("visual_alt"), g)]
+        for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
             got = pixabay_pick(q, pkey, used, s["dur"], a.work, i)
             if got:
                 break
