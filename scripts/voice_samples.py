@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""AQAR OF AFRICA - voice casting: rank the Moroccan/Arabic voices of the ElevenLabs library and render the same
-Darija lines with each candidate (several models), so the owner can choose by ear.
-Output: branch 'previews', folder <stamp>-voices/ with one mp3 per voice x model + ranking.txt"""
-import base64, json, os, sys, time, urllib.parse, urllib.request
+"""AQAR OF AFRICA - voice casting v2.
+Renders the same natural Darija line (expert / agency voice: calm, reassuring) with every Moroccan candidate
+voice on several ElevenLabs models, then assembles ONE labeled video (number + name + model card per clip)
+so the owner can choose by ear. Output on branch 'previews': <stamp>-voices/casting.mp4, list.txt, mp3 files."""
+import json, os, subprocess, sys, time, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import video_pipeline as vp
@@ -10,121 +11,110 @@ from tips2_pipeline import publish_fresh
 
 KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 H = {"xi-api-key": KEY, "User-Agent": "Mozilla/5.0 (AOA voices)"}
-EXPERT = ("خلّيني نقولّيك واحد الحاجة مهمّة. قبل ما تعرض الدار ديالك، وَجّد المِلفّ القانوني ديالها كامل: "
-          "الشهادة العقارية، رخصة السكن، وإبراء الذمّة. هادشي هو اللي كيخلّي المشتري يرتاح ويثق فيك.")
-ASKER = "بصراحة، أنا خايف نبيع الدار ونندم من بعد... شنو خاصّني نعرف قبل ما نبدا؟"
-MODELS = os.environ.get("MODELS", "eleven_multilingual_v2,eleven_v3").split(",")
+# Spoken Moroccan Darija, written the way it is said (no MSA words), short breath groups.
+LINE = ("[calm] شوف، ما تخافش. [reassuring] قبل ما تخلّص حتى ريال، طلب الشهادة ديال المحافظة، "
+        "وتأكّد بلّي الرسم سميتو هو... هاكّا غادي تبقى مرتاح، والحق ديالك مضمون.")
+MODELS = [m for m in os.environ.get("MODELS", "eleven_v4,eleven_v3,eleven_multilingual_v2").split(",") if m]
+TAGS_OK = ("eleven_v3", "eleven_v4")
+BASE = [("Ghizlane", "OfGMGmhShO8iL9jCkXy8", "F"), ("Loubna", "C5sH6vPhsC46AKaQmXXJ", "F"),
+        ("Tariq", "hiDWCdbsrOy64l833ab2", "M"), ("Jawad", "PmGnwGtnBs40iau7JfoF", "M"),
+        ("Radi", "eTfPFOvJJdhsKezAqEZm", "M"), ("Hamid", "A9ATTqUUQ6GHu0coCz8t", "M"),
+        ("Houssam", "NMWQDQipWXm8HlCLKapi", "M"), ("Ali", "5lXEHh42xcasVuJofypc", "M"),
+        ("Anas", "JyOZ8fOJkYGmajIlFsJ4", "M"), ("Khalil", "NrhVFquWMOHTRNOAY8AO", "M"),
+        ("Yassine", "H6pm0ljbvfqt4fzJd9Py", "M"), ("Rachid", "0Up3glsGKvZx3M5JI0XB", "M"),
+        ("Mehdi", "Vsm8jlUqY4LxvQNtr7R6", "M"), ("Abdelhadi", "cdfQ4039m26btcsBkvxH", "M")]
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
 def req(url, method="GET", body=None):
-    r = urllib.request.Request(url, method=method, data=body, headers={**H, **({"Content-Type": "application/json"} if body else {})})
+    r = urllib.request.Request(url, method=method, data=body,
+                               headers={**H, **({"Content-Type": "application/json"} if body else {})})
     with urllib.request.urlopen(r, timeout=180) as resp:
         return resp.read()
 
 
-def shared(params):
-    q = urllib.parse.urlencode({"page_size": 100, **params})
-    return json.loads(req("https://api.elevenlabs.io/v1/shared-voices?" + q)).get("voices", [])
-
-
-def norm(t):
-    import re
-    t = re.sub(r"[\u064B-\u0652\u0640]", "", t)
-    t = t.translate(str.maketrans("أإآىة", "اااىه"))
-    return re.sub(r"[^\u0621-\u064A ]", " ", t).split()
-
-
-def cer(ref, hyp):
-    a, b = " ".join(norm(ref)), " ".join(norm(hyp))
-    d = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        prev, d[0] = d[0], i
-        for j, cb in enumerate(b, 1):
-            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (ca != cb))
-    return d[len(b)] / max(1, len(a))
-
-
-def score(files, out_files):
-    """Intelligibility check: transcribe every sample with Whisper and compare with the script (lower CER = clearer)."""
+def credits():
     try:
-        from faster_whisper import WhisperModel
+        j = json.loads(req("https://api.elevenlabs.io/v1/user/subscription"))
+        return int(j.get("character_limit", 0)) - int(j.get("character_count", 0))
     except Exception as e:
-        vp.log("whisper unavailable", e); return
-    m = WhisperModel(os.environ.get("WHISPER", "medium"), device="cpu", compute_type="int8")
-    rows = []
-    for rel, p in files.items():
-        if not p.endswith(".mp3"):
-            continue
-        segs, info = m.transcribe(p, language="ar", beam_size=1, vad_filter=False)
-        hyp = " ".join(s.text for s in segs)
-        c, ref = min((cer(r, hyp), r) for r in (EXPERT, ASKER + " " + EXPERT))
-        wpm = len(norm(ref)) / max(1, info.duration) * 60
-        rows.append((c, rel.replace("/", " "), round(info.duration, 1), round(wpm), hyp.strip()))
-    rows.sort()
-    out = "\n".join(f"{r[0]:.3f} | {r[1]} | {r[2]}s | {r[3]} wpm | {r[4]}" for r in rows)
-    vp.log("SCORES\n" + out)
-    open("work/vs/scores.txt", "w").write(out)
-    out_files[[k for k in out_files if k.endswith("ranking.txt")][0].replace("ranking.txt", "scores.txt")] = "work/vs/scores.txt"
+        vp.log("credits check failed", e); return None
+
+
+def extra_females(have):
+    out = []
+    for params in ({"language": "ar", "accent": "moroccan", "gender": "female"},
+                   {"language": "ar", "search": "darija", "gender": "female"},
+                   {"language": "ar", "search": "moroccan", "gender": "female"}):
+        try:
+            q = urllib.parse.urlencode({"page_size": 50, **params})
+            for v in json.loads(req("https://api.elevenlabs.io/v1/shared-voices?" + q)).get("voices", []):
+                acc = (v.get("accent") or "").lower()
+                if v["voice_id"] not in have and "moroc" in acc + (v.get("description") or "").lower():
+                    have.add(v["voice_id"])
+                    out.append((v.get("name", "F").split(" ")[0], v["voice_id"], "F"))
+        except Exception as e:
+            vp.log("search failed", params, e)
+    return out[:3]
+
+
+def card(path, num, name, sex, model):
+    from PIL import Image, ImageDraw, ImageFont
+    im = Image.new("RGB", (1280, 720), (12, 28, 48))
+    d = ImageDraw.Draw(im)
+    big, mid = ImageFont.truetype(FONT, 230), ImageFont.truetype(FONT, 86)
+    d.text((640, 250), f"{num:02d}", font=big, fill=(212, 175, 55), anchor="mm")
+    d.text((640, 470), f"{name}  ({sex})", font=mid, fill=(255, 255, 255), anchor="mm")
+    d.text((640, 590), model.replace("eleven_", "").replace("multilingual_", "multi "), font=mid,
+           fill=(150, 190, 230), anchor="mm")
+    im.save(path)
 
 
 def main():
-    found = {}
-    for params in ({"language": "ar", "accent": "moroccan"}, {"language": "ar", "search": "moroccan"},
-                   {"language": "ar", "search": "darija"}, {"language": "ar", "accent": "moroccan", "gender": "female"},
-                   {"language": "ar", "search": "maroc", "gender": "female"}):
-        try:
-            for v in shared(params):
-                found[v["voice_id"]] = v
-        except Exception as e:
-            vp.log("shared voices failed", params, e)
-    vs = sorted(found.values(), key=lambda v: (v.get("category") != "professional", -(v.get("cloned_by_count") or 0),
-                                               -(v.get("usage_character_count_1y") or 0)))
-    lines = []
-    for v in vs:
-        lines.append(" | ".join(str(x) for x in (v.get("name"), v.get("voice_id"), v.get("gender"), v.get("age"),
-                                                 v.get("accent"), v.get("category"), v.get("cloned_by_count"),
-                                                 v.get("usage_character_count_1y"), v.get("use_case"))))
-    vp.log("\n".join(lines))
-    top = int(os.environ.get("TOP", "10"))
     os.makedirs("work/vs", exist_ok=True)
-    files = {}
+    before = credits()
+    vp.log("credits before:", before)
+    voices = BASE + extra_females({v[1] for v in BASE})
+    need = len(voices) * len(MODELS) * len(LINE)
+    if before is not None and before < need + 3000:
+        raise SystemExit(f"not enough credits: {before} < {need + 3000}")
     stamp = time.strftime("%Y%m%d%H%M%S") + "-voices"
-    open("work/vs/ranking.txt", "w").write("\n".join(lines))
-    files[f"{stamp}/ranking.txt"] = "work/vs/ranking.txt"
-    pick = [x for x in os.environ.get("VOICES", "").split(",") if x.strip()]
-    if pick:
-        vs = [found.get(x) or {"voice_id": x, "name": x} for x in pick]
-    for i, v in enumerate(vs[:top], 1):
-        text = EXPERT if (v.get("age") in ("middle_aged", "old") or i % 2) else ASKER + " " + EXPERT
+    files, segs, rows = {}, [], []
+    for i, (name, vid, sex) in enumerate(voices, 1):
         for m in MODELS:
+            text = LINE if m in TAGS_OK else LINE.replace("[calm] ", "").replace("[reassuring] ", "")
             body = {"text": text, "model_id": m}
-            if m != "eleven_v3":
-                body["voice_settings"] = {"stability": 0.45, "similarity_boost": 0.8, "style": 0.35, "use_speaker_boost": True}
+            if m == "eleven_multilingual_v2":
+                body["voice_settings"] = {"stability": 0.4, "similarity_boost": 0.8, "style": 0.3, "use_speaker_boost": True}
+            else:
+                body["voice_settings"] = {"stability": 0.5, "similarity_boost": 0.8}
+            short = m.replace("eleven_", "").replace("multilingual_", "multi")
+            mp3 = f"work/vs/{i:02d}-{name}-{short}.mp3"
             try:
-                audio = req(f"https://api.elevenlabs.io/v1/text-to-speech/{v['voice_id']}?output_format=mp3_44100_128",
-                            "POST", json.dumps(body).encode())
-                name = f"{i:02d}-{v.get('name','voice').split(' ')[0]}-{v.get('gender','')}-{m.replace('eleven_','')}.mp3"
-                p = f"work/vs/{name}"
-                open(p, "wb").write(audio)
-                files[f"{stamp}/{name}"] = p
+                open(mp3, "wb").write(req(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}?output_format=mp3_44100_128",
+                                          "POST", json.dumps(body).encode()))
             except Exception as e:
-                vp.log("tts failed", v.get("name"), m, e)
-    old = os.environ.get("RESCORE", "").strip()
-    extra = {}
-    if old:
-        import subprocess
-        vp.sh("git", "fetch", "--depth", "1", "origin", "previews")
-        os.makedirs("work/old", exist_ok=True)
-        names = subprocess.run(["git", "ls-tree", "--name-only", "FETCH_HEAD", old + "/"], stdout=subprocess.PIPE, text=True).stdout.split()
-        for n in names:
-            if n.endswith(".mp3"):
-                dst = "work/old/" + os.path.basename(n)
-                with open(dst, "wb") as f:
-                    subprocess.run(["git", "show", f"FETCH_HEAD:{n}"], stdout=f, check=True)
-                extra["old/" + n] = dst
-    score({**files, **extra}, files)
+                msg = e.read().decode()[:200] if hasattr(e, "read") else str(e)
+                vp.log("tts failed", name, m, msg); rows.append(f"{i:02d} {name} {short}: FAILED {msg}"); continue
+            files[f"{stamp}/{os.path.basename(mp3)}"] = mp3
+            png, ts = mp3[:-4] + ".png", mp3[:-4] + ".ts"
+            card(png, i, name, sex, m)
+            vp.sh("ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-framerate", "2", "-i", png, "-i", mp3,
+                  "-af", "apad=pad_dur=0.8", "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
+                  "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "-f", "mpegts", ts)
+            segs.append(ts)
+            rows.append(f"{i:02d} {name} ({sex}) {short}: {vid}")
+    after = credits()
+    rows += ["", f"credits before: {before}", f"credits after: {after}", "", "text: " + LINE]
+    open("work/vs/list.txt", "w").write("\n".join(rows))
+    files[f"{stamp}/list.txt"] = "work/vs/list.txt"
+    if segs:
+        vp.sh("ffmpeg", "-y", "-loglevel", "error", "-i", "concat:" + "|".join(segs), "-c", "copy",
+              "-movflags", "+faststart", "work/vs/casting.mp4")
+        files[f"{stamp}/casting.mp4"] = "work/vs/casting.mp4"
+    vp.log("\n".join(rows))
     vp.git_identity()
-    publish_fresh(files, "voice samples")
+    publish_fresh(files, "voice casting")
     vp.log("folder:", stamp)
 
 
