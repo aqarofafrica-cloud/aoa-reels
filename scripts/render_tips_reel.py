@@ -237,9 +237,9 @@ def scene_clip(src, kind, dur, mood, dst, first):
     if kind == "video":
         vd = duration(src)
         ss = 0.0 if vd <= dur + 0.5 else random.uniform(0.2, max(0.2, vd - dur - 0.2))
-        zoom = "1.10" if first else "1.04"
+        zoom = "1.10" if first else "1.05"   # slow push-out, never below 1.0 (crop must stay inside the frame)
         vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
-              f"scale=w='trunc({W}*({zoom}-0.06*t/{dur:.2f})/2)*2':h=-2:eval=frame,crop={W}:{H},"
+              f"scale=w='trunc({W}*max(1.002,{zoom}-0.04*t/{dur:.2f})/2)*2+2':h=-2:eval=frame,crop={W}:{H},"
               f"fps={FPS},{grade},{shade},format=yuv420p")
         cmd = ["ffmpeg", "-y", "-ss", f"{ss:.2f}", "-stream_loop", "-1", "-i", src, "-t", f"{dur:.3f}", "-an", "-vf", vf]
     else:
