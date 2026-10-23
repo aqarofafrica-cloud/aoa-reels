@@ -1,0 +1,19 @@
+name: probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: pip install --quiet pillow==10.4.0
+      - name: Probe services
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          NUELINK_API_KEY: ${{ secrets.NUELINK_API_KEY }}
+        run: python3 scripts/probe_services.py
