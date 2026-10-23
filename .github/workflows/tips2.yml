@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update -y >/dev/null
           sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core libraqm0 libfribidi0 libpango-1.0-0 libpangoft2-1.0-0 >/dev/null
-          pip install --quiet pillow==10.4.0 weasyprint==62.3
+          pip install --quiet pillow==10.4.0 weasyprint==70.0
       - name: Run advice job
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
