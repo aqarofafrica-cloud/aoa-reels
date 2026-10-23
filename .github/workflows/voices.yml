@@ -1,0 +1,31 @@
+name: voices
+on:
+  workflow_dispatch:
+    inputs:
+      top:
+        description: "How many voices to sample"
+        required: false
+        default: "10"
+      models:
+        description: "Comma-separated models"
+        required: false
+        default: "eleven_multilingual_v2,eleven_v3"
+permissions:
+  contents: write
+concurrency:
+  group: previews-branch
+  cancel-in-progress: false
+jobs:
+  voices:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: pip install --quiet pillow==10.4.0
+      - name: Render voice samples
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          TOP: ${{ inputs.top }}
+          MODELS: ${{ inputs.models }}
+        run: python3 scripts/voice_samples.py
