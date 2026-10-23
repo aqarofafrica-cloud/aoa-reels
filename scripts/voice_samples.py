@@ -27,10 +27,51 @@ def shared(params):
     return json.loads(req("https://api.elevenlabs.io/v1/shared-voices?" + q)).get("voices", [])
 
 
+def norm(t):
+    import re
+    t = re.sub(r"[\u064B-\u0652\u0640]", "", t)
+    t = t.translate(str.maketrans("أإآىة", "اااىه"))
+    return re.sub(r"[^\u0621-\u064A ]", " ", t).split()
+
+
+def cer(ref, hyp):
+    a, b = " ".join(norm(ref)), " ".join(norm(hyp))
+    d = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, d[0] = d[0], i
+        for j, cb in enumerate(b, 1):
+            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (ca != cb))
+    return d[len(b)] / max(1, len(a))
+
+
+def score(files, out_files):
+    """Intelligibility check: transcribe every sample with Whisper and compare with the script (lower CER = clearer)."""
+    try:
+        from faster_whisper import WhisperModel
+    except Exception as e:
+        vp.log("whisper unavailable", e); return
+    m = WhisperModel(os.environ.get("WHISPER", "medium"), device="cpu", compute_type="int8")
+    rows = []
+    for rel, p in files.items():
+        if not p.endswith(".mp3"):
+            continue
+        segs, info = m.transcribe(p, language="ar", beam_size=1, vad_filter=False)
+        hyp = " ".join(s.text for s in segs)
+        c, ref = min((cer(r, hyp), r) for r in (EXPERT, ASKER + " " + EXPERT))
+        wpm = len(norm(ref)) / max(1, info.duration) * 60
+        rows.append((c, rel.replace("/", " "), round(info.duration, 1), round(wpm), hyp.strip()))
+    rows.sort()
+    out = "\n".join(f"{r[0]:.3f} | {r[1]} | {r[2]}s | {r[3]} wpm | {r[4]}" for r in rows)
+    vp.log("SCORES\n" + out)
+    open("work/vs/scores.txt", "w").write(out)
+    out_files[[k for k in out_files if k.endswith("ranking.txt")][0].replace("ranking.txt", "scores.txt")] = "work/vs/scores.txt"
+
+
 def main():
     found = {}
     for params in ({"language": "ar", "accent": "moroccan"}, {"language": "ar", "search": "moroccan"},
-                   {"language": "ar", "search": "darija"}):
+                   {"language": "ar", "search": "darija"}, {"language": "ar", "accent": "moroccan", "gender": "female"},
+                   {"language": "ar", "search": "maroc", "gender": "female"}):
         try:
             for v in shared(params):
                 found[v["voice_id"]] = v
@@ -50,6 +91,9 @@ def main():
     stamp = time.strftime("%Y%m%d%H%M%S") + "-voices"
     open("work/vs/ranking.txt", "w").write("\n".join(lines))
     files[f"{stamp}/ranking.txt"] = "work/vs/ranking.txt"
+    pick = [x for x in os.environ.get("VOICES", "").split(",") if x.strip()]
+    if pick:
+        vs = [found.get(x) or {"voice_id": x, "name": x} for x in pick]
     for i, v in enumerate(vs[:top], 1):
         text = EXPERT if (v.get("age") in ("middle_aged", "old") or i % 2) else ASKER + " " + EXPERT
         for m in MODELS:
@@ -65,6 +109,20 @@ def main():
                 files[f"{stamp}/{name}"] = p
             except Exception as e:
                 vp.log("tts failed", v.get("name"), m, e)
+    old = os.environ.get("RESCORE", "").strip()
+    extra = {}
+    if old:
+        import subprocess
+        vp.sh("git", "fetch", "--depth", "1", "origin", "previews")
+        os.makedirs("work/old", exist_ok=True)
+        names = subprocess.run(["git", "ls-tree", "--name-only", "FETCH_HEAD", old + "/"], stdout=subprocess.PIPE, text=True).stdout.split()
+        for n in names:
+            if n.endswith(".mp3"):
+                dst = "work/old/" + os.path.basename(n)
+                with open(dst, "wb") as f:
+                    subprocess.run(["git", "show", f"FETCH_HEAD:{n}"], stdout=f, check=True)
+                extra["old/" + n] = dst
+    score({**files, **extra}, files)
     vp.git_identity()
     publish_fresh(files, "voice samples")
     vp.log("folder:", stamp)
