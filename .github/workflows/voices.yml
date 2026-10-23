@@ -1,11 +1,6 @@
 name: voices
 on:
   workflow_dispatch:
-    inputs:
-      models:
-        description: "Comma-separated models"
-        required: false
-        default: "eleven_v4,eleven_v3,eleven_multilingual_v2"
 permissions:
   contents: write
 concurrency:
@@ -25,5 +20,4 @@ jobs:
       - name: Render voice casting
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          MODELS: ${{ inputs.models }}
         run: python3 scripts/voice_samples.py
