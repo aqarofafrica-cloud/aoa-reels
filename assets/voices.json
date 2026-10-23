@@ -1,0 +1,26 @@
+{
+  "model": "eleven_v3",
+  "narrators": [
+    {"name": "Ghizlane", "id": "OfGMGmhShO8iL9jCkXy8", "gender": "female"},
+    {"name": "Jawad", "id": "PmGnwGtnBs40iau7JfoF", "gender": "male"},
+    {"name": "Radi", "id": "eTfPFOvJJdhsKezAqEZm", "gender": "male"},
+    {"name": "Loubna", "id": "C5sH6vPhsC46AKaQmXXJ", "gender": "female"},
+    {"name": "Tariq", "id": "hiDWCdbsrOy64l833ab2", "gender": "male"}
+  ],
+  "roles": {
+    "expert": [
+      {"name": "Tariq", "id": "hiDWCdbsrOy64l833ab2", "gender": "male"},
+      {"name": "Ghizlane", "id": "OfGMGmhShO8iL9jCkXy8", "gender": "female"},
+      {"name": "Jawad", "id": "PmGnwGtnBs40iau7JfoF", "gender": "male"}
+    ],
+    "asker": [
+      {"name": "Loubna", "id": "C5sH6vPhsC46AKaQmXXJ", "gender": "female"},
+      {"name": "Anas", "id": "JyOZ8fOJkYGmajIlFsJ4", "gender": "male"},
+      {"name": "Ali", "id": "5lXEHh42xcasVuJofypc", "gender": "male"}
+    ],
+    "witness": [
+      {"name": "Hamid", "id": "A9ATTqUUQ6GHu0coCz8t", "gender": "male"},
+      {"name": "Houssam", "id": "NMWQDQipWXm8HlCLKapi", "gender": "male"}
+    ]
+  }
+}
