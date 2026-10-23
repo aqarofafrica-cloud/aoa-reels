@@ -76,7 +76,9 @@ def logo_file():
 
 
 def music_file():
-    tracks = [l.strip().split("|", 1) for l in open("assets/tracks.txt") if l.strip() and not l.startswith("#")]
+    # advice reels: calm cinematic tracks only (brand constitution), property reels keep assets/tracks.txt
+    src = "assets/tracks_calm.txt" if os.path.exists("assets/tracks_calm.txt") else "assets/tracks.txt"
+    tracks = [l.strip().split("|", 1) for l in open(src) if l.strip() and not l.startswith("#")]
     name, url = tracks[RUN % len(tracks)]
     try:
         return name, vp.fetch(url, "work/music.mp3")

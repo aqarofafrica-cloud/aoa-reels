@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AQAR OF AFRICA - advice reel with Darija voice-over (ElevenLabs), expressive stock visuals (Pixabay),
-kinetic word-by-word captions, ducked music, whoosh cuts, progress bar and the brand end card.
+calm word-by-word captions, ducked calm music, soft dissolves (no commercial whooshes), progress bar,
+brand watermark and the brand end card (brand constitution 2026-10-23: trust and mini-lessons, never cheap ads).
 
 Usage: render_tips_reel.py --plan reel.json --out reel.mp4 --preview preview.mp4 --work DIR
                            [--music track.mp3] [--logo logo.png] [--voices assets/voices.json] [--run N]
@@ -16,11 +17,12 @@ import argparse, base64, json, os, random, re, subprocess, sys, urllib.parse, ur
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from render_reel import end_card, brand_badge, badge_overlay
-from render_video import sfx_file, ass_time, esc
+from render_video import ass_time, esc
 
 W, H, FPS = 1080, 1920, 30
 END = 3.5
 PAD = 0.28            # silence after each line
+XF = 0.5              # soft dissolve between scenes (cinematic, calm rhythm)
 MUSIC_VOL = 0.16      # owner feedback 2026-10-23: music well under the voice-over (was 0.45)
 FONT = "DejaVu Sans"
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
@@ -81,8 +83,8 @@ def pick_voices(cfg, mode, run_no):
 
 TAG = re.compile(r"\[[^\]]{1,40}\]")
 ROLE_SETTINGS = {   # expert = the agency voice: steady and calm; other characters: freer, more emotional
-    "expert": {"stability": 0.55, "similarity_boost": 0.8},
-    "narrator": {"stability": 0.55, "similarity_boost": 0.8},
+    "expert": {"stability": 0.62, "similarity_boost": 0.8},
+    "narrator": {"stability": 0.62, "similarity_boost": 0.8},
     "asker": {"stability": 0.35, "similarity_boost": 0.8},
     "witness": {"stability": 0.4, "similarity_boost": 0.8},
 }
@@ -280,7 +282,7 @@ def scene_clip(src, kind, dur, mood, dst, first):
         cmd = ["ffmpeg", "-y", "-ss", f"{ss:.2f}", "-stream_loop", "-1", "-i", src, "-t", f"{dur:.3f}", "-an", "-vf", vf]
     else:
         vf = (f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,crop={W*2}:{H*2},"
-              f"zoompan=z='min(1+0.0011*on,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:s={W}x{H}:fps={FPS},"
+              f"zoompan=z='min(1+0.0006*on,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:s={W}x{H}:fps={FPS},"
               f"{grade},{shade},format=yuv420p")
         cmd = ["ffmpeg", "-y", "-loop", "1", "-i", src, "-frames:v", str(fr), "-vf", vf]
     run(cmd + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(FPS), dst])
@@ -308,7 +310,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ev = []
     add = lambda layer, a, b, st, tx: ev.append(f"Dialogue: {layer},{ass_time(a)},{ass_time(b)},{st},,0,0,0,,{tx}")
     if hook:
-        add(3, 0.0, min(2.6, scenes[0]["dur"]), "Hook", r"{\fad(120,250)\t(0,250,\fscx108\fscy108)\t(250,500,\fscx100\fscy100)}" + esc(hook))
+        add(3, 0.0, min(2.6, scenes[0]["dur"]), "Hook", r"{\fad(350,400)}" + esc(hook))
     for s in scenes:
         t0, t1 = s["t0"], s["t0"] + s["dur"]
         if s.get("title") and not (s is scenes[0] and hook):
@@ -328,7 +330,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             c_end = chunks[ci + 1][0][1] if ci + 1 < len(chunks) else t1
             for wi, (w, a, b) in enumerate(ch):
                 nxt = ch[wi + 1][1] if wi + 1 < len(ch) else c_end
-                txt = " ".join(r"{\c&H004BB0E8&\fscx112\fscy112}" + x + r"{\c&H00FFFFFF&\fscx100\fscy100}" if k == wi else x
+                txt = " ".join(r"{\c&H004BB0E8&}" + x + r"{\c&H00FFFFFF&}" if k == wi else x
                                for k, (x, _, _) in enumerate(ch))
                 add(1, a, max(nxt, a + 0.05), "Cap", txt)
     open(path, "w", encoding="utf-8").write(head + "\n".join(ev) + "\n")
@@ -402,7 +404,7 @@ def main():
         got = got or brand_bg(os.path.join(a.work, f"bg{i:02d}.jpg"))
         kinds.append(got[1] if got[0] else "brand")
         c = os.path.join(a.work, f"c{i:02d}.mp4")
-        scene_clip(got[0], got[1], s["dur"], s.get("mood"), c, i == 0)
+        scene_clip(got[0], got[1], s["dur"] + XF, s.get("mood"), c, i == 0)
         clips.append(c)
     ec = os.path.join(a.work, "end.jpg")
     end_card(ec, a.logo)
@@ -412,10 +414,17 @@ def main():
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(FPS), endc])
     clips.append(endc)
     total = body + END
-    lst = os.path.join(a.work, "list.txt")
-    open(lst, "w").write("".join(f"file '{os.path.abspath(c)}'\n" for c in clips))
+    # soft dissolves: clip i lasts dur_i + XF and fades into clip i+1 exactly at scene i+1's start time
     vid = os.path.join(a.work, "video.mp4")
-    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", vid])
+    starts = [s["t0"] for s in scenes[1:]] + [body]
+    ins_v, fx, last = [], [], "0:v"
+    for c in clips:
+        ins_v += ["-i", c]
+    for j, off in enumerate(starts, 1):
+        fx.append(f"[{last}][{j}:v]xfade=transition=fade:duration={XF}:offset={off:.3f}[x{j}]")
+        last = f"x{j}"
+    run(["ffmpeg", "-y", *ins_v, "-filter_complex", ";".join(fx), "-map", f"[{last}]", "-t", f"{total:.3f}",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-r", str(FPS), vid])
 
     # 3) captions + progress bar
     ass = os.path.join(a.work, "caps.ass")
@@ -428,7 +437,7 @@ def main():
     run(["ffmpeg", "-y", "-i", vid, "-f", "lavfi", "-i", bar, *(["-i", badge] if badge else []), "-filter_complex", fc,
          "-map", "[v]", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), vtx])
 
-    # 4) audio: voice lines at their times + whoosh at cuts + ducked music
+    # 4) audio: voice lines at their times + situational sfx + ducked calm music
     ins, parts, labels = [], [], []
     k = 0
     for s in scenes:
@@ -437,12 +446,6 @@ def main():
             ms = int(s["t0"] * 1000)
             parts.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo,adelay={ms}|{ms}[a{k}]")
             labels.append(f"[a{k}]"); k += 1
-    wh = os.path.join(a.work, "whoosh.wav")
-    sfx_file("whoosh", 0.45, wh)
-    for s in scenes[1:] + [{"t0": body}]:
-        ins += ["-i", wh]
-        ms = max(0, int((s["t0"] - 0.2) * 1000))
-        parts.append(f"[{k}:a]adelay={ms}|{ms}[a{k}]"); labels.append(f"[a{k}]"); k += 1
     n_sfx = 0
     for i, s in enumerate(scenes):
         if not (key and voice_ok and s.get("sfx") and n_sfx < 3):
