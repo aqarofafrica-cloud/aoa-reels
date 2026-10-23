@@ -23,6 +23,7 @@ END = 3.5
 PAD = 0.28            # silence after each line
 FONT = "DejaVu Sans"
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
+STOP = {"the", "and", "with", "for", "from", "into", "at", "of", "on", "in", "a", "an", "his", "her", "their", "looking", "showing"}
 ROLE_AR = {"asker": "المشتري", "expert": "الخبير", "witness": "تجربة", "narrator": ""}
 MOOD_GRADE = {
     "worry": "eq=saturation=0.75:contrast=1.08:brightness=-0.03,colorbalance=bs=0.06:rs=-0.03",
@@ -117,32 +118,50 @@ def pixabay_pick(query, key, used, want, workdir, idx):
         return None
     try:
         q = urllib.parse.urlencode({"key": key, "q": query[:90], "per_page": 30, "safesearch": "true", "video_type": "film"})
-        hits = json.loads(http("https://pixabay.com/api/videos/?" + q, timeout=40)).get("hits") or []
-        hits = [h for h in hits if h["id"] not in used and (h.get("duration") or 0) >= min(want, 6)]
-        hits.sort(key=lambda h: (-(h["videos"].get("medium", {}).get("height", 0) > h["videos"].get("medium", {}).get("width", 1)),
-                                 -h.get("likes", 0)))
-        for h in hits[:3]:
-            v = h["videos"].get("medium") or h["videos"].get("small")
-            if not v or not v.get("url"):
-                continue
-            dst = os.path.join(workdir, f"v{idx:02d}.mp4")
-            open(dst, "wb").write(http(v["url"], timeout=120))
-            used.add(h["id"])
-            return dst, "video"
+        vids = json.loads(http("https://pixabay.com/api/videos/?" + q, timeout=40)).get("hits") or []
     except Exception as e:
-        log("pixabay video failed", query, e)
+        log("pixabay video failed", query, e); vids = []
     try:
-        q = urllib.parse.urlencode({"key": key, "q": query[:90], "per_page": 30, "safesearch": "true",
+        q = urllib.parse.urlencode({"key": key, "q": query[:90], "per_page": 40, "safesearch": "true",
                                     "orientation": "vertical", "image_type": "photo"})
-        hits = [h for h in json.loads(http("https://pixabay.com/api/?" + q, timeout=40)).get("hits") or [] if h["id"] not in used]
-        for h in hits[:3]:
-            url = h.get("largeImageURL") or h.get("webformatURL")
-            dst = os.path.join(workdir, f"i{idx:02d}.jpg")
-            open(dst, "wb").write(http(url, timeout=60))
-            used.add(h["id"])
-            return dst, "image"
+        pics = json.loads(http("https://pixabay.com/api/?" + q, timeout=40)).get("hits") or []
     except Exception as e:
-        log("pixabay photo failed", query, e)
+        log("pixabay photo failed", query, e); pics = []
+    words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
+
+    def score(h):
+        tags = h.get("tags", "").lower()
+        return sum(1 for w in words if w[:5] in tags)
+
+    def fresh(h):
+        sig = (h.get("user_id"), h.get("tags"))
+        return h["id"] not in used and sig not in used
+
+    def take(h):
+        used.add(h["id"]); used.add((h.get("user_id"), h.get("tags")))
+
+    cands = []
+    for h in vids:
+        v = h["videos"].get("medium") or h["videos"].get("small") or {}
+        if fresh(h) and v.get("url") and (h.get("duration") or 0) >= min(want, 5):
+            portrait = v.get("height", 0) > v.get("width", 1)
+            cands.append((score(h) + 0.6 + (0.3 if portrait else 0), "video", h, v["url"]))
+    for h in pics:
+        url = h.get("largeImageURL") or h.get("webformatURL")
+        if fresh(h) and url:
+            cands.append((score(h), "image", h, url))
+    need = 2 if len(words) >= 2 else 1
+    cands = [c for c in cands if c[0] >= need]
+    cands.sort(key=lambda c: (-c[0], -c[2].get("likes", 0)))
+    for sc, kind, h, url in cands[:4]:
+        try:
+            dst = os.path.join(workdir, f"{'v' if kind == 'video' else 'i'}{idx:02d}.{'mp4' if kind == 'video' else 'jpg'}")
+            open(dst, "wb").write(http(url, timeout=120))
+            take(h)
+            log("visual", idx, kind, round(sc, 1), query, "->", h.get("tags"))
+            return dst, kind
+        except Exception as e:
+            log("download failed", e)
     return None
 
 
