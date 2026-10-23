@@ -23,6 +23,12 @@ END = 3.5
 PAD = 0.28            # silence after each line
 FONT = "DejaVu Sans"
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
+BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "quran", "koran", "mosque", "prayer", "islam",
+       "muslim", "religion", "church", "bible", "christian", "cross", "god", "pray", "bikini", "lingerie", "alcohol", "beer",
+       "wine", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
+GENERIC = {"worry": ["worried man", "stress woman"], "tension": ["stress business", "confused couple"],
+           "neutral": ["real estate agent", "apartment building"], "happy": ["happy couple home", "family home"],
+           "relief": ["handshake business", "smiling couple"]}
 STOP = {"the", "and", "with", "for", "from", "into", "at", "of", "on", "in", "a", "an", "his", "her", "their", "looking", "showing"}
 ROLE_AR = {"asker": "المشتري", "expert": "الخبير", "witness": "تجربة", "narrator": ""}
 MOOD_GRADE = {
@@ -130,12 +136,13 @@ def pixabay_pick(query, key, used, want, workdir, idx):
     words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
 
     def score(h):
-        tags = h.get("tags", "").lower()
-        return sum(1 for w in words if w[:5] in tags)
+        toks = re.findall(r"[a-z]+", h.get("tags", "").lower())
+        return sum(1 for w in words if any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2))
 
     def fresh(h):
         sig = (h.get("user_id"), h.get("tags"))
-        return h["id"] not in used and sig not in used
+        toks = set(re.findall(r"[a-z]+", h.get("tags", "").lower()))
+        return h["id"] not in used and sig not in used and not toks.intersection(BAN)
 
     def take(h):
         used.add(h["id"]); used.add((h.get("user_id"), h.get("tags")))
@@ -145,15 +152,15 @@ def pixabay_pick(query, key, used, want, workdir, idx):
         v = h["videos"].get("medium") or h["videos"].get("small") or {}
         if fresh(h) and v.get("url") and (h.get("duration") or 0) >= min(want, 5):
             portrait = v.get("height", 0) > v.get("width", 1)
-            cands.append((score(h) + 0.6 + (0.3 if portrait else 0), "video", h, v["url"]))
+            cands.append((score(h), 0.6 + (0.3 if portrait else 0), "video", h, v["url"]))
     for h in pics:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if fresh(h) and url:
-            cands.append((score(h), "image", h, url))
-    need = 2 if len(words) >= 2 else 1
+            cands.append((score(h), 0.0, "image", h, url))
+    need = min(2, len(words)) if words else 1
     cands = [c for c in cands if c[0] >= need]
-    cands.sort(key=lambda c: (-c[0], -c[2].get("likes", 0)))
-    for sc, kind, h, url in cands[:4]:
+    cands.sort(key=lambda c: (-(c[0] + c[1]), -c[3].get("likes", 0)))
+    for sc, bonus, kind, h, url in cands[:4]:
         try:
             dst = os.path.join(workdir, f"{'v' if kind == 'video' else 'i'}{idx:02d}.{'mp4' if kind == 'video' else 'jpg'}")
             open(dst, "wb").write(http(url, timeout=120))
@@ -300,9 +307,12 @@ def main():
     used, kinds = set(), []
     clips = []
     for i, s in enumerate(scenes):
-        got = pixabay_pick(s.get("visual"), pkey, used, s["dur"], a.work, i) or \
-              pixabay_pick(s.get("visual_alt"), pkey, used, s["dur"], a.work, i) or \
-              brand_bg(os.path.join(a.work, f"bg{i:02d}.jpg"))
+        got = None
+        for q in [s.get("visual"), s.get("visual_alt")] + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
+            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i)
+            if got:
+                break
+        got = got or brand_bg(os.path.join(a.work, f"bg{i:02d}.jpg"))
         kinds.append(got[1] if got[0] else "brand")
         c = os.path.join(a.work, f"c{i:02d}.mp4")
         scene_clip(got[0], got[1], s["dur"], s.get("mood"), c, i == 0)
