@@ -78,6 +78,72 @@ def pick_voices(cfg, mode, run_no):
     return {"narrator": expert, "expert": expert, "asker": asker, "witness": witness}
 
 
+TAG = re.compile(r"\[[^\]]{1,40}\]")
+ROLE_SETTINGS = {   # expert = the agency voice: steady and calm; other characters: freer, more emotional
+    "expert": {"stability": 0.55, "similarity_boost": 0.8},
+    "narrator": {"stability": 0.55, "similarity_boost": 0.8},
+    "asker": {"stability": 0.35, "similarity_boost": 0.8},
+    "witness": {"stability": 0.4, "similarity_boost": 0.8},
+}
+
+
+def clean_line(text, model):
+    """Audio tags ([calm], [worried], [sighs]...) are read by Eleven v4 as delivery directions."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def tts(text, voice, model, key, prev, nxt, dst, role="narrator"):
+    body = {"text": clean_line(text, model), "model_id": model,
+            "voice_settings": dict(ROLE_SETTINGS.get(role, ROLE_SETTINGS["narrator"]))}
+    raw = http(f"https://api.elevenlabs.io/v1/text-to-speech/{voice['id']}/with-timestamps?output_format=mp3_44100_128",
+               "POST", {"xi-api-key": key, "Content-Type": "application/json"}, json.dumps(body).encode(), 180)
+    j = json.loads(raw)
+    open(dst, "wb").write(base64.b64decode(j["audio_base64"]))
+    al = j.get("alignment") or j.get("normalized_alignment") or {}
+    chars, st, en = al.get("characters") or [], al.get("character_start_times_seconds") or [], al.get("character_end_times_seconds") or []
+    words, cur, ws, depth, last_end = [], "", None, 0, 0
+    for c, a, b in zip(chars, st, en):
+        if c == "[":
+            depth += 1
+        if depth or c.isspace():
+            if c == "]":
+                depth = max(0, depth - 1)
+            if cur:
+                words.append((cur, ws, last_end)); cur = ""
+            continue
+        if not cur:
+            ws = a
+        cur += c
+        last_end = b
+    if cur:
+        words.append((cur, ws, last_end))
+    return words
+
+
+def sfx(desc, secs, key, dst):
+    body = {"text": desc[:200], "duration_seconds": max(0.8, min(4.0, secs)), "prompt_influence": 0.5}
+    raw = http("https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128", "POST",
+               {"xi-api-key": key, "Content-Type": "application/json"}, json.dumps(body).encode(), 120)
+    open(dst, "wb").write(raw)
+    return dst
+
+
+def credits_left(key):
+    try:
+        j = json.loads(http("https://api.elevenlabs.io/v1/user/subscription", headers={"xi-api-key": key}, timeout=30))
+        return int(j.get("character_limit", 0)) - int(j.get("character_count", 0))
+    except Exception:
+        return None
+
+
+def estimate_words(text, t0=0.0):
+    out, t = [], t0
+    for w in TAG.sub(" ", text).split():
+        d = 0.18 + 0.055 * len(w)
+        out.append((w, t, t + d)); t += d
+    return out
+
+
 # ---------------------------------------------------------------- visuals
 def pixabay_pick(query, key, used, want, workdir, idx):
     """Return (path, kind) for a stock visual, preferring portrait video long enough."""
@@ -231,7 +297,7 @@ def main():
         raise RuntimeError("reel plan has no scenes")
     mode = "dialogue" if plan.get("mode") == "dialogue" else "solo"
     cfg = json.load(open(a.voices, encoding="utf-8"))
-    model = cfg.get("model", "eleven_v3")
+    model = "eleven_v4"          # owner decision 2026-10-23: only Eleven v4 voices (v3 / multilingual v2 banned)
     voices = pick_voices(cfg, mode, a.run)
     key = os.environ.get("ELEVENLABS_API_KEY", "")
     pkey = os.environ.get("PIXABAY_API_KEY", "")

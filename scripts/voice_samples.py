@@ -3,7 +3,7 @@
 Renders the same natural Darija line (expert / agency voice: calm, reassuring) with every Moroccan candidate
 voice on several ElevenLabs models, then assembles ONE labeled video (number + name + model card per clip)
 so the owner can choose by ear. Output on branch 'previews': <stamp>-voices/casting.mp4, list.txt, mp3 files."""
-import json, os, subprocess, sys, time, urllib.parse, urllib.request
+import json, os, sys, time, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import video_pipeline as vp
@@ -14,8 +14,7 @@ H = {"xi-api-key": KEY, "User-Agent": "Mozilla/5.0 (AOA voices)"}
 # Spoken Moroccan Darija, written the way it is said (no MSA words), short breath groups.
 LINE = ("[calm] شوف، ما تخافش. [reassuring] قبل ما تخلّص حتى ريال، طلب الشهادة ديال المحافظة، "
         "وتأكّد بلّي الرسم سميتو هو... هاكّا غادي تبقى مرتاح، والحق ديالك مضمون.")
-MODELS = [m for m in os.environ.get("MODELS", "eleven_v4,eleven_v3,eleven_multilingual_v2").split(",") if m]
-TAGS_OK = ("eleven_v3", "eleven_v4")
+MODELS = ["eleven_v4"]   # owner decision: Eleven v4 only
 BASE = [("Ghizlane", "OfGMGmhShO8iL9jCkXy8", "F"), ("Loubna", "C5sH6vPhsC46AKaQmXXJ", "F"),
         ("Tariq", "hiDWCdbsrOy64l833ab2", "M"), ("Jawad", "PmGnwGtnBs40iau7JfoF", "M"),
         ("Radi", "eTfPFOvJJdhsKezAqEZm", "M"), ("Hamid", "A9ATTqUUQ6GHu0coCz8t", "M"),
@@ -65,7 +64,7 @@ def card(path, num, name, sex, model):
     big, mid = ImageFont.truetype(FONT, 230), ImageFont.truetype(FONT, 86)
     d.text((640, 250), f"{num:02d}", font=big, fill=(212, 175, 55), anchor="mm")
     d.text((640, 470), f"{name}  ({sex})", font=mid, fill=(255, 255, 255), anchor="mm")
-    d.text((640, 590), model.replace("eleven_", "").replace("multilingual_", "multi "), font=mid,
+    d.text((640, 590), model.replace("eleven_", ""), font=mid,
            fill=(150, 190, 230), anchor="mm")
     im.save(path)
 
@@ -82,13 +81,8 @@ def main():
     files, segs, rows = {}, [], []
     for i, (name, vid, sex) in enumerate(voices, 1):
         for m in MODELS:
-            text = LINE if m in TAGS_OK else LINE.replace("[calm] ", "").replace("[reassuring] ", "")
-            body = {"text": text, "model_id": m}
-            if m == "eleven_multilingual_v2":
-                body["voice_settings"] = {"stability": 0.4, "similarity_boost": 0.8, "style": 0.3, "use_speaker_boost": True}
-            else:
-                body["voice_settings"] = {"stability": 0.5, "similarity_boost": 0.8}
-            short = m.replace("eleven_", "").replace("multilingual_", "multi")
+            body = {"text": LINE, "model_id": m, "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}}
+            short = m.replace("eleven_", "")
             mp3 = f"work/vs/{i:02d}-{name}-{short}.mp3"
             try:
                 open(mp3, "wb").write(req(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}?output_format=mp3_44100_128",
