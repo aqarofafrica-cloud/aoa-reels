@@ -148,6 +148,10 @@ def estimate_words(text, t0=0.0):
 PERSON = re.compile(r"\b(man|woman|men|women|guy|lady|businessman|businesswoman|person|agent|realtor|consultant|advisor|expert|buyer|seller)\b", re.I)
 
 
+OTHER_SEX = {"male": {"woman", "women", "female", "girl", "girls", "lady", "businesswoman", "mother", "wife"},
+             "female": {"man", "men", "male", "boy", "boys", "guy", "businessman", "father", "husband", "beard"}}
+
+
 def match_gender(query, gender):
     """Keep the person on screen consistent with the voice we hear (male voice -> man, female voice -> woman)."""
     if not query or gender not in ("male", "female") or not PERSON.search(query):
@@ -161,7 +165,7 @@ def match_gender(query, gender):
     return q
 
 
-def pixabay_pick(query, key, used, want, workdir, idx):
+def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
     """Return (path, kind) for a stock visual, preferring portrait video long enough."""
     if not key or not query:
         return None
@@ -185,7 +189,7 @@ def pixabay_pick(query, key, used, want, workdir, idx):
     def fresh(h):
         sig = (h.get("user_id"), h.get("tags"))
         toks = set(re.findall(r"[a-z]+", h.get("tags", "").lower()))
-        return h["id"] not in used and sig not in used and not toks.intersection(BAN)
+        return h["id"] not in used and sig not in used and not toks.intersection(BAN) and not toks.intersection(avoid)
 
     def take(h):
         used.add(h["id"]); used.add((h.get("user_id"), h.get("tags")))
@@ -354,8 +358,9 @@ def main():
         got = None
         g = (voices.get(s.get("speaker") or "narrator") or {}).get("gender") if mode == "dialogue" else None
         qs = [match_gender(s.get("visual"), g), match_gender(s.get("visual_alt"), g)]
+        avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
-            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i)
+            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
             if got:
                 break
         got = got or brand_bg(os.path.join(a.work, f"bg{i:02d}.jpg"))
