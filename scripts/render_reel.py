@@ -49,6 +49,30 @@ def end_card(dst, logo=None):
     ctext(PHONE, ImageFont.truetype(FONT_B, 92), y + 330, (255, 255, 255))
     c.save(dst, quality=95)
 
+BADGE_W, BADGE_M = 170, 36   # brand watermark: width and margin (px, top-right corner)
+
+
+def brand_badge(logo, dst, width=BADGE_W):
+    """AQAR OF AFRICA logo on a white rounded plate, kept on screen during the whole video (visual identity)."""
+    if not logo or not os.path.exists(logo):
+        return None
+    lg = Image.open(logo).convert("RGBA")
+    pad = int(width * 0.08)
+    s = (width - 2 * pad) / lg.width
+    lg = lg.resize((int(lg.width * s), int(lg.height * s)), Image.LANCZOS)
+    h = lg.height + 2 * pad
+    plate = Image.new("RGBA", (width, h), (0, 0, 0, 0))
+    ImageDraw.Draw(plate).rounded_rectangle([0, 0, width - 1, h - 1], radius=int(width * 0.12), fill=(255, 255, 255, 235))
+    plate.alpha_composite(lg, (pad, pad))
+    plate.save(dst)
+    return dst
+
+
+def badge_overlay(src_label, idx, until, out_label):
+    """ffmpeg filter: put the badge (input #idx) top-right until `until` seconds (the end card has its own big logo)."""
+    return (f"[{src_label}][{idx}:v]overlay=x=W-w-{BADGE_M}:y={BADGE_M}:enable='lt(t,{until:.2f})'[{out_label}]")
+
+
 def run(cmd):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -85,6 +109,11 @@ def main():
         filt.append(f"[{last}][{i}:v]xfade=transition=fade:duration={XF}:offset={off:.2f}[{out}]")
         last = out
     total = off + clips[-1][1]
+    badge = brand_badge(a.logo, os.path.join(tmp, "badge.png"))
+    if badge:
+        inputs += ["-i", badge]
+        filt.append(badge_overlay(last, len(clips), off, "vb"))
+        last = "vb"
     video = os.path.join(tmp, "video.mp4")
     run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filt), "-map", f"[{last}]",
          "-c:v", "libx264", "-preset", "medium", "-crf", "21", "-pix_fmt", "yuv420p", "-r", str(FPS), video])

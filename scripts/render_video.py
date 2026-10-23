@@ -16,7 +16,7 @@ Everything is drawn with FFmpeg + libass (Arabic shaping via HarfBuzz/FriBidi).
 import argparse, json, os, subprocess, tempfile, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from render_reel import end_card  # same end card as the photo reels
+from render_reel import end_card, brand_badge, badge_overlay  # same end card as the photo reels
 
 W, H, FPS = 1080, 1920, 30
 END = 3.5
@@ -205,9 +205,12 @@ def main():
         cur = "zm"
     col = colour_filters(plan, ts)
     fonts = "/usr/share/fonts/truetype/noto"
-    chain.append(f"[{cur}]" + ",".join(col + [f"ass={ass}", f"fps={FPS}", "format=yuv420p"]) + "[v]")
+    badge = brand_badge(a.logo, os.path.join(tmp, "badge.png"))
+    chain.append(f"[{cur}]" + ",".join(col + [f"ass={ass}", f"fps={FPS}"]) + ("[v0]" if badge else ",format=yuv420p[v]"))
+    if badge:
+        chain.append(badge_overlay("v0", 1, length + 1, "v1") + ";[v1]format=yuv420p[v]")
     body = os.path.join(tmp, "body.mp4")
-    run(["ffmpeg", "-y", "-i", a.src, "-filter_complex", ";".join(chain), "-map", "[v]", "-an",
+    run(["ffmpeg", "-y", "-i", a.src, *(["-i", badge] if badge else []), "-filter_complex", ";".join(chain), "-map", "[v]", "-an",
          "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", str(FPS), body])
 
     # 2) end card (same as photo reels) + concat

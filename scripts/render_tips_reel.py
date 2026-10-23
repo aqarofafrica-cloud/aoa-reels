@@ -15,12 +15,13 @@ Prints one JSON line: {"seconds", "voice_ok", "voices", "credits_left", "visuals
 import argparse, base64, json, os, random, re, subprocess, sys, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from render_reel import end_card
+from render_reel import end_card, brand_badge, badge_overlay
 from render_video import sfx_file, ass_time, esc
 
 W, H, FPS = 1080, 1920, 30
 END = 3.5
 PAD = 0.28            # silence after each line
+MUSIC_VOL = 0.16      # owner feedback 2026-10-23: music well under the voice-over (was 0.45)
 FONT = "DejaVu Sans"
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
 BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "quran", "koran", "mosque", "prayer", "islam",
@@ -165,6 +166,39 @@ def match_gender(query, gender):
     return q
 
 
+# What is SAID decides what is SEEN: real-estate terms of the spoken line -> stock-footage queries that show them.
+# (owner feedback 2026-10-23: "title deed" must show someone reading property papers, never accounting sheets)
+CONCEPTS = [
+    (r"تصميم|التصميم|البلان|بلان|المهندس|مهندس|الهندسي|مكتب الدراسات|رخصة البناء", ["architect blueprint", "architect drawing plans", "engineer construction plans"]),
+    (r"الورش|ورش|الشانطي|البني|بناء|البناء|المقاول", ["construction site worker", "building construction", "construction workers"]),
+    (r"الموثق|موثق|العدول|عدول|العقد|عقد|توقيع|التوقيع|الكونطرا|كونطرا|سنيي", ["signing contract", "notary signing documents", "handshake contract"]),
+    (r"الرسم|رسم|المحافظة|محافظة|التحفيظ|محفظ|الشهادة|شهادة|الملكية|ملكية|الوثائق|وثائق|الأوراق|الاوراق|الورقة|ورقة|الملف|ملف|الكاغيط",
+     ["man reading documents", "couple reading documents", "woman reading papers", "checking documents"]),
+    (r"العربون|عربون|خلص|خلّص|الخلاص|الفلوس|فلوس|درهم|الثمن|ثمن|السومة|ريال|مليون", ["cash money hands", "counting money", "paying cash"]),
+    (r"الساروت|ساروت|المفاتيح|مفاتيح|السوارت", ["house keys hand", "keys new home", "giving keys"]),
+    (r"البنك|بنك|القرض|قرض|الكريدي|كريدي|التمويل", ["bank loan meeting", "bank advisor client"]),
+    (r"السمسار|سمسار|الوسيط|وسيط", ["real estate agent client", "agent showing house"]),
+    (r"الكراء|كراء|كاري|المكتري|مكتري|الكاري", ["tenant apartment", "moving into apartment"]),
+    (r"البحر|الشاطئ|البلاية|بلاية", ["beach sea view", "sea coast"]),
+]
+MONEY_Q = re.compile(r"\b(money|cash|bank|loan|tax|pay|paying|payment|price|budget|finance|counting)\b", re.I)
+OFFICE_NOISE = {"accountant", "accounting", "financial", "finance", "chart", "charts", "graph", "graphs", "statistics",
+                "analytics", "spreadsheet", "budget", "report", "data", "trading", "stock", "stocks", "diagram",
+                "calculator", "invoice", "tax", "taxes", "economy", "profit", "analysis", "audit", "excel"}
+
+
+def concept_queries(line):
+    """Stock queries for the first real-estate term spoken in the line (earliest match wins)."""
+    text = TAG.sub(" ", line or "")
+    best = None
+    for pat, qs in CONCEPTS:
+        # whole words only (optional و/ف/ب/ل/ك prefix and pronoun suffix), so "معقد" never matches "عقد"
+        m = re.search(r"(?<![\u0621-\u064A])[وفبلك]?(?:" + pat + r")(?:ها|هم|و|ك|نا|ي|ت|تي)?(?![\u0621-\u064A])", text)
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), qs)
+    return list(best[1]) if best else []
+
+
 def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
     """Return (path, kind) for a stock visual, preferring portrait video long enough."""
     if not key or not query:
@@ -189,7 +223,9 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
     def fresh(h):
         sig = (h.get("user_id"), h.get("tags"))
         toks = set(re.findall(r"[a-z]+", h.get("tags", "").lower()))
-        return h["id"] not in used and sig not in used and not toks.intersection(BAN) and not toks.intersection(avoid)
+        noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+        return (h["id"] not in used and sig not in used and not toks.intersection(BAN) and not toks.intersection(avoid)
+                and not toks.intersection(noise))
 
     def take(h):
         used.add(h["id"]); used.add((h.get("user_id"), h.get("tags")))
@@ -263,7 +299,7 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{FONT},74,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H96000000&,1,0,0,0,100,100,0,0,1,6,2,2,70,70,520,-1
 Style: Hook,{FONT},96,&H00FFFFFF&,&H00FFFFFF&,&H0020120C&,&H64000000&,1,0,0,0,100,100,0,0,1,8,3,5,70,70,0,1
-Style: Title,{FONT},58,&H0020120C&,&H0020120C&,&H004BB0E8&,&H00000000&,1,0,0,0,100,100,0,0,3,20,0,8,80,80,140,1
+Style: Title,{FONT},58,&H0020120C&,&H0020120C&,&H004BB0E8&,&H00000000&,1,0,0,0,100,100,0,0,3,20,0,8,80,80,252,1
 Style: Who,{FONT},46,&H004BB0E8&,&H004BB0E8&,&H00000000&,&H00000000&,1,0,0,0,100,100,0,0,1,4,0,2,70,70,760,1
 
 [Events]
@@ -357,7 +393,7 @@ def main():
     for i, s in enumerate(scenes):
         got = None
         g = (voices.get(s.get("speaker") or "narrator") or {}).get("gender") if mode == "dialogue" else None
-        qs = [match_gender(s.get("visual"), g), match_gender(s.get("visual_alt"), g)]
+        qs = [match_gender(q, g) for q in concept_queries(s.get("line"))[:2] + [s.get("visual"), s.get("visual_alt")] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
             got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
@@ -386,8 +422,10 @@ def main():
     build_ass(scenes, (plan.get("hook") or "").strip(), total, ass)
     vtx = os.path.join(a.work, "vtx.mp4")
     bar = f"color=c=0xE8B04B:s={W}x12:r={FPS}"
-    run(["ffmpeg", "-y", "-i", vid, "-f", "lavfi", "-i", bar, "-filter_complex",
-         f"[0:v]ass={ass}[c];[c][1:v]overlay=x='-W+W*t/{body:.2f}':y=0:enable='lt(t,{body:.2f})':shortest=1[v]",
+    badge = brand_badge(a.logo, os.path.join(a.work, "badge.png"))
+    fc = f"[0:v]ass={ass}[c];[c][1:v]overlay=x='-W+W*t/{body:.2f}':y=0:enable='lt(t,{body:.2f})':shortest=1"
+    fc = fc + ("[pb];" + badge_overlay("pb", 2, body, "v") if badge else "[v]")
+    run(["ffmpeg", "-y", "-i", vid, "-f", "lavfi", "-i", bar, *(["-i", badge] if badge else []), "-filter_complex", fc,
          "-map", "[v]", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), vtx])
 
     # 4) audio: voice lines at their times + whoosh at cuts + ducked music
@@ -424,9 +462,9 @@ def main():
     if a.music:
         ins += ["-stream_loop", "-1", "-i", a.music]
         parts.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{total:.2f},"
-                     f"volume=0.45,afade=t=in:d=1,afade=t=out:st={total - 2.5:.2f}:d=2.5[mus]")
+                     f"volume={MUSIC_VOL},afade=t=in:d=1,afade=t=out:st={total - 2.5:.2f}:d=2.5[mus]")
         parts.append("[vo]asplit=2[vo1][key]")
-        parts.append("[mus][key]sidechaincompress=threshold=0.03:ratio=9:attack=15:release=450[duck]")
+        parts.append("[mus][key]sidechaincompress=threshold=0.015:ratio=14:attack=10:release=500[duck]")
         parts.append("[vo1][duck]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[aout]")
     else:
         parts.append("[vo]alimiter=limit=0.95[aout]")
