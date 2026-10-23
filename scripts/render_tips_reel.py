@@ -64,57 +64,18 @@ def duration(path):
 
 # ---------------------------------------------------------------- voices
 def pick_voices(cfg, mode, run_no):
+    """The expert is always the agency voice (assets/voices.json "agency", fixed); the other characters rotate."""
     narr = cfg.get("narrators") or []
     roles = cfg.get("roles") or {}
     rot = lambda lst, k=0: lst[(run_no + k) % len(lst)] if lst else None
+    agency = cfg.get("agency")
+    agency = rot(agency) if isinstance(agency, list) else agency
+    expert = agency or rot(roles.get("expert") or narr)
     if mode != "dialogue":
-        v = rot(narr)
-        return {"narrator": v, "expert": v, "asker": v, "witness": v}
-    expert = rot(roles.get("expert") or narr)
+        return {"narrator": expert, "expert": expert, "asker": expert, "witness": expert}
     asker = rot([x for x in (roles.get("asker") or narr) if x["id"] != expert["id"]] or narr, 1)
     witness = rot([x for x in (roles.get("witness") or narr) if x["id"] not in (expert["id"], asker["id"])] or narr, 2)
     return {"narrator": expert, "expert": expert, "asker": asker, "witness": witness}
-
-
-def tts(text, voice, model, key, prev, nxt, dst):
-    body = {"text": text, "model_id": model}
-    if model != "eleven_v3":      # v3 does not take request stitching context
-        body.update({"previous_text": prev or None, "next_text": nxt or None})
-    raw = http(f"https://api.elevenlabs.io/v1/text-to-speech/{voice['id']}/with-timestamps?output_format=mp3_44100_128",
-               "POST", {"xi-api-key": key, "Content-Type": "application/json"}, json.dumps(body).encode(), 180)
-    j = json.loads(raw)
-    open(dst, "wb").write(base64.b64decode(j["audio_base64"]))
-    al = j.get("normalized_alignment") or j.get("alignment") or {}
-    chars, st, en = al.get("characters") or [], al.get("character_start_times_seconds") or [], al.get("character_end_times_seconds") or []
-    words, cur, ws = [], "", None
-    for c, a, b in zip(chars, st, en):
-        if c.isspace():
-            if cur:
-                words.append((cur, ws, b)); cur = ""
-            continue
-        if not cur:
-            ws = a
-        cur += c
-        last_end = b
-    if cur:
-        words.append((cur, ws, last_end))
-    return words
-
-
-def credits_left(key):
-    try:
-        j = json.loads(http("https://api.elevenlabs.io/v1/user/subscription", headers={"xi-api-key": key}, timeout=30))
-        return int(j.get("character_limit", 0)) - int(j.get("character_count", 0))
-    except Exception:
-        return None
-
-
-def estimate_words(text, t0=0.0):
-    out, t = [], t0
-    for w in text.split():
-        d = 0.18 + 0.055 * len(w)
-        out.append((w, t, t + d)); t += d
-    return out
 
 
 # ---------------------------------------------------------------- visuals
@@ -287,7 +248,8 @@ def main():
             try:
                 prev = scenes[i - 1]["line"] if i else ""
                 nxt = scenes[i + 1]["line"] if i + 1 < len(scenes) else ""
-                words = tts(s["line"].strip(), voices.get(s.get("speaker") or "narrator") or voices["narrator"], model, key, prev, nxt, mp3)
+                role = s.get("speaker") or "narrator"
+                words = tts(s["line"].strip(), voices.get(role) or voices["narrator"], model, key, prev, nxt, mp3, role)
                 s["audio"] = mp3
                 s["dur"] = max(duration(mp3), words[-1][2] if words else 0) + PAD
             except Exception as e:
@@ -354,6 +316,20 @@ def main():
         ins += ["-i", wh]
         ms = max(0, int((s["t0"] - 0.2) * 1000))
         parts.append(f"[{k}:a]adelay={ms}|{ms}[a{k}]"); labels.append(f"[a{k}]"); k += 1
+    n_sfx = 0
+    for i, s in enumerate(scenes):
+        if not (key and voice_ok and s.get("sfx") and n_sfx < 3):
+            continue
+        try:
+            fx = sfx(s["sfx"], min(3.0, s["dur"]), key, os.path.join(a.work, f"fx{i:02d}.mp3"))
+            n_sfx += 1
+            ins += ["-i", fx]
+            ms = int(s["t0"] * 1000)
+            parts.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo,volume=0.32,afade=t=out:st=2.2:d=0.8,adelay={ms}|{ms}[a{k}]")
+            labels.append(f"[a{k}]"); k += 1
+            log("sfx", i, s["sfx"])
+        except Exception as e:
+            log("sfx failed", s.get("sfx"), e)
     parts.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{total:.2f}[sil]")
     parts.append(f"[sil]{''.join(labels)}amix=inputs={1 + len(labels)}:normalize=0:duration=first,volume=1.35[vo]")
     if a.music:
