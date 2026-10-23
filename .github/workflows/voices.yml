@@ -2,22 +2,10 @@ name: voices
 on:
   workflow_dispatch:
     inputs:
-      top:
-        description: "How many voices to sample"
-        required: false
-        default: "10"
-      voices:
-        description: "Comma-separated voice ids (empty = ranking)"
-        required: false
-        default: ""
-      rescore:
-        description: "Old previews folder to score too"
-        required: false
-        default: ""
       models:
         description: "Comma-separated models"
         required: false
-        default: "eleven_multilingual_v2,eleven_v3"
+        default: "eleven_v4,eleven_v3,eleven_multilingual_v2"
 permissions:
   contents: write
 concurrency:
@@ -26,16 +14,16 @@ concurrency:
 jobs:
   voices:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install
-        run: pip install --quiet pillow==10.4.0 faster-whisper==1.1.1
-      - name: Render voice samples
+        run: |
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y ffmpeg fonts-dejavu-core >/dev/null
+          pip install --quiet pillow==10.4.0
+      - name: Render voice casting
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          TOP: ${{ inputs.top }}
           MODELS: ${{ inputs.models }}
-          VOICES: ${{ inputs.voices }}
-          RESCORE: ${{ inputs.rescore }}
         run: python3 scripts/voice_samples.py
