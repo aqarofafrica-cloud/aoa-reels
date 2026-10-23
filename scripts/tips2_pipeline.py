@@ -116,6 +116,9 @@ def do_render(job, p, cb):
            "--preview", "work/preview.mp4", "--work", "work/reel", "--logo", logo]
     if music:
         cmd += ["--music", music]
+    if p.get("voices"):          # manual test: try a casting without touching assets/voices.json
+        json.dump(p["voices"], open("work/voices.json", "w", encoding="utf-8"), ensure_ascii=False)
+        cmd += ["--voices", "work/voices.json"]
     rinfo = json.loads(subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True).stdout.strip().splitlines()[-1])
     # publishable media -> Nuelink only
     car = [{"id": nuelink_upload(f"work/cards/{f}", "image/png")} for f in info["carousel"]]
