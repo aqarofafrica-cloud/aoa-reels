@@ -28,7 +28,7 @@ FONT = "DejaVu Sans"
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
 BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "quran", "koran", "mosque", "prayer", "islam",
        "muslim", "religion", "church", "bible", "christian", "cross", "god", "pray", "bikini", "lingerie", "alcohol", "beer",
-       "wine", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
+       "wine", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "chinese", "japanese", "korean", "calligraphy", "kanji", "hieroglyph", "newspaper", "graffiti", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
 GENERIC = {"worry": ["worried man", "stress woman"], "tension": ["stress business", "confused couple"],
            "neutral": ["real estate agent", "apartment building"], "happy": ["happy couple home", "family home"],
            "relief": ["handshake business", "smiling couple"]}
