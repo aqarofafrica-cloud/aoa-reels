@@ -39,10 +39,22 @@ BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "qura
        "muslim", "religion", "church", "bible", "christian", "cross", "god", "pray", "bikini", "lingerie", "alcohol", "beer",
        "wine", "christmas", "xmas", "santa", "gift", "gifts", "present", "holiday", "costume", "robe", "kimono",
        "asian", "asia", "china", "japan", "india", "hindu", "buddha", "buddhism", "temple", "dollar", "dollars", "usd", "parchment",
-       "antique", "vintage", "grunge", "texture", "background", "wallpaper", "illustration", "cartoon", "vector", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "chinese", "japanese", "korean", "calligraphy", "kanji", "hieroglyph", "newspaper", "graffiti", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
-GENERIC = {"worry": ["worried man", "stress woman"], "tension": ["stress business", "confused couple"],
-           "neutral": ["real estate agent", "apartment building"], "happy": ["happy couple home", "family home"],
-           "relief": ["handshake business", "smiling couple"]}
+       "antique", "vintage", "grunge", "bed", "bedroom", "sleep", "sleeping", "pajamas", "pyjamas", "nightgown",
+       "sexy", "sensual", "seductive", "underwear", "lingerie", "bathroom", "shower", "bath", "makeup", "beauty", "fashion",
+       "model", "glamour", "party", "drunk", "nightclub", "gym", "fitness", "yoga", "despair", "depression", "scream",
+       "screaming", "crying", "tears", "grimace", "headache", "pain", "sick", "illness", "hospital", "texture", "background", "wallpaper", "illustration", "cartoon", "vector", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "chinese", "japanese", "korean", "calligraphy", "kanji", "hieroglyph", "newspaper", "graffiti", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
+GENERIC = {"worry": ["worried businessman office", "business woman documents"],
+           "tension": ["serious business meeting", "businessman reading contract"],
+           "neutral": ["real estate agent client", "business meeting office"],
+           "happy": ["real estate agent couple handshake", "couple new apartment keys"],
+           "relief": ["business handshake", "smiling businessman office"]}
+# owner style 2026-10-24: trust and formality. Every shot with people must show a professional context
+# (suits, elegant office wear, offices, meetings, signing, property visits with an agent), never private life.
+PRO = {"business", "businessman", "businesswoman", "businessmen", "suit", "suits", "office", "meeting", "professional",
+       "corporate", "handshake", "agent", "realtor", "consultant", "contract", "documents", "document", "signing",
+       "notary", "lawyer", "manager", "executive", "client", "clients", "deal", "agreement", "estate", "property",
+       "apartment", "house", "keys", "interview", "desk", "workplace", "partnership", "negotiation", "bank", "formal",
+       "tie", "presentation", "conference", "employee", "team", "colleagues", "architect", "engineer", "construction"}
 HUMAN = {"man", "men", "woman", "women", "person", "people", "girl", "boy", "businessman", "businesswoman", "couple",
          "family", "hand", "hands", "lady", "guy", "male", "female", "adult", "worker", "father", "mother", "child", "human"}
 STOP = {"the", "and", "with", "for", "from", "into", "at", "of", "on", "in", "a", "an", "his", "her", "their", "looking", "showing"}
@@ -254,6 +266,8 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
         noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
         if want_person and not toks.intersection(HUMAN):
             return False                      # the query asks for a person: no empty paper / object shots
+        if toks.intersection(HUMAN) and not toks.intersection(PRO):
+            return False                      # people only in a professional context (owner style: trust, formality)
         return (h["id"] not in used and sig not in used and not toks.intersection(BAN) and not toks.intersection(avoid)
                 and not toks.intersection(noise))
 
@@ -301,7 +315,7 @@ def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
     best = []
     for h in vids:
         toks = set(re.findall(r"[a-z]+", (h.get("url") or "").lower().rsplit("/video/", 1)[-1]))
-        if ("px", h["id"]) in used or toks & set(BAN) or toks & set(avoid) or toks & noise or (h.get("duration") or 0) < min(want, 5):
+        if ("px", h["id"]) in used or toks & set(BAN) or (toks & HUMAN and not toks & PRO) or toks & set(avoid) or toks & noise or (h.get("duration") or 0) < min(want, 5):
             continue
         sc = sum(1 for w in words if any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2))
         files = [f for f in h.get("video_files") or [] if (f.get("height") or 0) > (f.get("width") or 0) and 1000 <= (f.get("height") or 0) <= 2000]
