@@ -334,7 +334,7 @@ def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
     return None
 
 
-COVERR_BUDGET = [24]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
+COVERR_BUDGET = [30]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
 # Coverr also hosts AI / abstract renders and lifestyle clips: never for an advice lesson
 COVERR_BAN = {"ai", "generated", "abstract", "render", "rendering", "cgi", "animation", "animated", "3d", "egg", "sculpture",
               "art", "artistic", "surreal", "fantasy", "neon", "hologram", "futuristic", "skateboard", "skate", "selfie",
@@ -419,6 +419,123 @@ def coverr_pick(query, key, used, want, workdir, idx, avoid=()):
             return dst, "video"
         except Exception as e:
             log("coverr download failed", e)
+    return None
+
+
+# ---------------------------------------------------------------- vision check (owner 2026-10-24)
+# The voice-over decides the shot: candidate clips from Coverr + Pixabay are shown to Claude (thumbnails) with the
+# spoken line, and Claude picks the one that shows that exact idea in a professional style, or rejects them all.
+VISION_MODEL = "claude-sonnet-5-5"
+VISION_USED = []                     # titles / tags already chosen, so Claude avoids repeating the same scene or actor
+
+
+def coverr_candidates(query, key, used, want, avoid=()):
+    if not key or not query or COVERR_BUDGET[0] <= 0:
+        return []
+    words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
+    v = " ".join(words[:2]) if len(words) > 2 else " ".join(words)
+    COVERR_BUDGET[0] -= 1
+    try:
+        q = urllib.parse.urlencode({"query": v, "page_size": 20, "urls": "true", "sort": "popular"})
+        hits = json.loads(http("https://api.coverr.co/videos?" + q, headers={"Authorization": "Bearer " + key},
+                               timeout=40)).get("hits") or []
+    except Exception as e:
+        log("coverr failed", v, e); return []
+    noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+    out = []
+    for h in hits:
+        text = " ".join([h.get("title") or "", h.get("description") or "", " ".join(h.get("tags") or [])]).lower()
+        toks = set(re.findall(r"[a-z]+", text))
+        url = (h.get("urls") or {}).get("mp4") or (h.get("urls") or {}).get("mp4_download")
+        thumb = h.get("thumbnail") or h.get("poster")
+        try:
+            dur = float(h.get("duration") or 0)
+        except (TypeError, ValueError):
+            dur = 0.0
+        if not url or not thumb or ("cv", h.get("id")) in used or toks & (set(BAN) - {"sign", "signs"}) \
+                or toks & COVERR_BAN or toks & set(avoid) or toks & noise or (dur and dur < min(want, 4)):
+            continue
+        out.append({"src": "coverr", "id": ("cv", h.get("id")), "url": url, "thumb": thumb, "kind": "video",
+                    "text": (h.get("title") or "")[:90]})
+    return out[:4]
+
+
+def pixabay_candidates(query, key, used, want, avoid=()):
+    if not key or not query:
+        return []
+    try:
+        q = urllib.parse.urlencode({"key": key, "q": query[:90], "per_page": 20, "safesearch": "true", "video_type": "film"})
+        vids = json.loads(http("https://pixabay.com/api/videos/?" + q, timeout=40)).get("hits") or []
+    except Exception as e:
+        log("pixabay video failed", query, e); return []
+    noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+    out = []
+    for h in vids:
+        toks = set(re.findall(r"[a-z]+", h.get("tags", "").lower()))
+        vv = h["videos"].get("medium") or h["videos"].get("small") or {}
+        thumb = vv.get("thumbnail") or (h["videos"].get("small") or {}).get("thumbnail")
+        if not vv.get("url") or not thumb or h["id"] in used or toks & set(BAN) or toks & set(avoid) or toks & noise \
+                or (h.get("duration") or 0) < min(want, 5) or (toks & HUMAN and not toks & PRO):
+            continue
+        out.append({"src": "pixabay", "id": h["id"], "url": vv["url"], "thumb": thumb, "kind": "video",
+                    "text": h.get("tags", "")[:90]})
+    return out[:4]
+
+
+def vision_pick(line, shot, cands, akey):
+    """Ask Claude which thumbnail shows the spoken idea. Returns the chosen candidate or None."""
+    if not akey or not cands:
+        return None
+    content = [{"type": "text", "text": (
+        "أنت مونتير محترف لريلز تعليمية ديال وكالة عقارية مغربية (دورة تدريبية مصغرة، ستيل الثقة والرسميات).\n"
+        f"الجملة اللي كيقولها الصوت فهاد المشهد: {NORM.sub('', TAG.sub(' ', line or '')).strip()}\n"
+        f"اللقطة المطلوبة فالسيناريو: {shot}\n"
+        + ("لقطات ديجا مستعملة فالريل (ما تختارش نفس المشهد ولا نفس الشخص): " + " | ".join(VISION_USED[-8:]) + "\n" if VISION_USED else "")
+        + "هادي صور من فيديوهات مرشحة، مرقمة بالترتيب. اختار الرقم ديال اللقطة اللي كتبين بالضبط الفكرة اللي كتقال، "
+          "فيها ناس فسياق مهني (كومبلي، لباس إداري أنيق، مكتب، توقيع، وثائق، مفاتيح، زيارة عقار) ولا شيء مرتبط مباشرة بالجملة. "
+          "ارفض: حواسيب وكلافيي بوحدهم، ناس بلباس كاجوال ولا فالزنقة، رياضة، توصيل، حياة خاصة، رسوم ولا صور مولدة، كتابة مقروءة. "
+          "إلا حتى وحدة ما كتصلح، جاوب -1. جاوب غير بـ JSON: {\"pick\": رقم, \"why\": \"سبب قصير\"}")}]
+    for n, c in enumerate(cands):
+        content.append({"type": "text", "text": f"اللقطة {n}:"})
+        content.append({"type": "image", "source": {"type": "url", "url": c["thumb"]}})
+    body = {"model": VISION_MODEL, "max_tokens": 200, "messages": [{"role": "user", "content": content}]}
+    try:
+        raw = http("https://api.anthropic.com/v1/messages", "POST",
+                   {"x-api-key": akey, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                   json.dumps(body).encode(), 90)
+        txt = "".join(b.get("text", "") for b in json.loads(raw).get("content", []) if b.get("type") == "text")
+        m = re.search(r"\{.*\}", txt, re.S)
+        j = json.loads(m.group(0)) if m else {}
+        n = int(j.get("pick", -1))
+        log("vision", shot, "->", n, j.get("why", "")[:120])
+        return cands[n] if 0 <= n < len(cands) else None
+    except Exception as e:
+        log("vision failed", e)
+        return None
+
+
+def vision_visual(s, qs, keys, used, workdir, idx, avoid):
+    """Candidates per query (Coverr + Pixabay), Claude picks; downloads only the chosen clip."""
+    ckey, pkey, akey = keys
+    shot = " / ".join(q for q in qs[:2] if q)
+    for q in qs[:3]:
+        cands = coverr_candidates(q, ckey, used, s["dur"], avoid) + pixabay_candidates(q, pkey, used, s["dur"], avoid)
+        ids, uniq = set(), []
+        for c in cands:
+            if c["id"] not in ids:
+                ids.add(c["id"]); uniq.append(c)
+        c = vision_pick(s.get("line"), shot, uniq[:6], akey)
+        if not c:
+            continue
+        try:
+            dst = os.path.join(workdir, f"vx{idx:02d}.mp4")
+            open(dst, "wb").write(http(c["url"], timeout=180))
+            used.add(c["id"])
+            VISION_USED.append(c["text"][:60])
+            log("visual", idx, c["src"], "vision", q, "->", c["text"])
+            return dst, "video"
+        except Exception as e:
+            log("vision download failed", e)
     return None
 
 
@@ -605,6 +722,7 @@ def main():
     pkey = os.environ.get("PIXABAY_API_KEY", "")
     xkey = os.environ.get("PEXELS_API_KEY", "")
     ckey = os.environ.get("COVERR_API_KEY", "")
+    akey = os.environ.get("ANTHROPIC_API_KEY", "")
     random.seed(a.run)
 
     # 1) voice per line
@@ -644,7 +762,8 @@ def main():
         # the montage scenario (validated by the owner in the PDF) decides the shot; spoken-term concepts are only a fallback
         qs = [match_gender(q, g) for q in [s.get("visual"), s.get("visual_alt")] + concept_queries(s.get("line"))[:2] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
-        for k, q in enumerate(qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])):
+        got = vision_visual(s, qs, (ckey, pkey, akey), used, a.work, i, avoid) if akey else None
+        for k, q in enumerate([] if got else qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])):
             # owner 2026-10-24: the Coverr reel (reftest5) is the reference style -> Coverr first for the scenario's own
             # shots, Pixabay when Coverr has no clip that shows the spoken idea, then Pexels
             got = (coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) if k < 3 else None) \
