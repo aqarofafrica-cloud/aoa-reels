@@ -37,41 +37,6 @@
    "gender": "male"
   },
   {
-   "name": "Houssam",
-   "id": "NMWQDQipWXm8HlCLKapi",
-   "gender": "male"
-  },
-  {
-   "name": "Ali",
-   "id": "5lXEHh42xcasVuJofypc",
-   "gender": "male"
-  },
-  {
-   "name": "Anas",
-   "id": "JyOZ8fOJkYGmajIlFsJ4",
-   "gender": "male"
-  },
-  {
-   "name": "Khalil",
-   "id": "NrhVFquWMOHTRNOAY8AO",
-   "gender": "male"
-  },
-  {
-   "name": "Yassine",
-   "id": "H6pm0ljbvfqt4fzJd9Py",
-   "gender": "male"
-  },
-  {
-   "name": "Rachid",
-   "id": "0Up3glsGKvZx3M5JI0XB",
-   "gender": "male"
-  },
-  {
-   "name": "Mehdi",
-   "id": "Vsm8jlUqY4LxvQNtr7R6",
-   "gender": "male"
-  },
-  {
    "name": "Abdelhadi",
    "id": "cdfQ4039m26btcsBkvxH",
    "gender": "male"
@@ -92,33 +57,18 @@
     "gender": "female"
    },
    {
-    "name": "Anas",
-    "id": "JyOZ8fOJkYGmajIlFsJ4",
-    "gender": "male"
-   },
-   {
     "name": "Ghizlane",
     "id": "OfGMGmhShO8iL9jCkXy8",
     "gender": "female"
    },
    {
-    "name": "Ali",
-    "id": "5lXEHh42xcasVuJofypc",
+    "name": "Radi",
+    "id": "eTfPFOvJJdhsKezAqEZm",
     "gender": "male"
    },
    {
-    "name": "Mehdi",
-    "id": "Vsm8jlUqY4LxvQNtr7R6",
-    "gender": "male"
-   },
-   {
-    "name": "Khalil",
-    "id": "NrhVFquWMOHTRNOAY8AO",
-    "gender": "male"
-   },
-   {
-    "name": "Houssam",
-    "id": "NMWQDQipWXm8HlCLKapi",
+    "name": "Jawad",
+    "id": "PmGnwGtnBs40iau7JfoF",
     "gender": "male"
    }
   ],
@@ -126,6 +76,11 @@
    {
     "name": "Hamid",
     "id": "A9ATTqUUQ6GHu0coCz8t",
+    "gender": "male"
+   },
+   {
+    "name": "Abdelhadi",
+    "id": "cdfQ4039m26btcsBkvxH",
     "gender": "male"
    },
    {
@@ -137,27 +92,8 @@
     "name": "Radi",
     "id": "eTfPFOvJJdhsKezAqEZm",
     "gender": "male"
-   },
-   {
-    "name": "Yassine",
-    "id": "H6pm0ljbvfqt4fzJd9Py",
-    "gender": "male"
-   },
-   {
-    "name": "Rachid",
-    "id": "0Up3glsGKvZx3M5JI0XB",
-    "gender": "male"
-   },
-   {
-    "name": "Abdelhadi",
-    "id": "cdfQ4039m26btcsBkvxH",
-    "gender": "male"
-   },
-   {
-    "name": "Houssam",
-    "id": "NMWQDQipWXm8HlCLKapi",
-    "gender": "male"
    }
   ]
- }
+ },
+ "note": "Owner decision 2026-10-24: only these 7 Eleven v4 voices are allowed. Tariq = agency voice (expert)."
 }
