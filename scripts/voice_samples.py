@@ -12,7 +12,9 @@ from tips2_pipeline import publish_fresh
 KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 H = {"xi-api-key": KEY, "User-Agent": "Mozilla/5.0 (AOA voices)"}
 # Spoken Moroccan Darija, written the way it is said (no MSA words), short breath groups.
-LINE = ("[calm] شوف، ما تخافش. [reassuring] قبل ما تخلّص حتى ريال، طلب الشهادة ديال المحافظة، "
+# two registers per voice: a worried client, then the calm expert, so the owner hears the range.
+LINE = ("[worried] والله ما عرفت شنو ندير... خلّصت العربون، وما عرفتش واش الرسم سميتو ولا لا! "
+        "[calm] شوف، ما تخافش. [reassuring] قبل ما تخلّص حتى ريال، طلب الشهادة ديال المحافظة، "
         "وتأكّد بلّي الرسم سميتو هو... هاكّا غادي تبقى مرتاح، والحق ديالك مضمون.")
 MODELS = ["eleven_v4"]   # owner decision: Eleven v4 only
 BASE = [("Ghizlane", "OfGMGmhShO8iL9jCkXy8", "F"), ("Loubna", "C5sH6vPhsC46AKaQmXXJ", "F"),
@@ -73,7 +75,7 @@ def main():
     os.makedirs("work/vs", exist_ok=True)
     before = credits()
     vp.log("credits before:", before)
-    voices = BASE + extra_females({v[1] for v in BASE})
+    voices = list(BASE)          # exactly the 14 kept voices, v4 only
     need = len(voices) * len(MODELS) * len(LINE)
     if before is not None and before < need + 3000:
         raise SystemExit(f"not enough credits: {before} < {need + 3000}")
