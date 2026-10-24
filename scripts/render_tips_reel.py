@@ -363,7 +363,10 @@ def coverr_pick(query, key, used, want, workdir, idx, avoid=()):
     for h in hits:
         toks = set(re.findall(r"[a-z]+", " ".join(h.get("tags") or []).lower() + " " + (h.get("title") or "").lower()))
         url = (h.get("urls") or {}).get("mp4") or (h.get("urls") or {}).get("mp4_download")
-        dur = h.get("duration") or 0
+        try:
+            dur = float(h.get("duration") or 0)      # Coverr returns seconds as a string ("22.022000")
+        except (TypeError, ValueError):
+            dur = 0.0
         dur = dur / 1000.0 if dur > 1000 else dur
         if not url or ("cv", h.get("id")) in used or toks & set(BAN) or toks & set(avoid) or toks & noise:
             continue
