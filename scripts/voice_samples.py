@@ -20,10 +20,7 @@ MODELS = ["eleven_v4"]   # owner decision: Eleven v4 only
 BASE = [("Ghizlane", "OfGMGmhShO8iL9jCkXy8", "F"), ("Loubna", "C5sH6vPhsC46AKaQmXXJ", "F"),
         ("Tariq", "hiDWCdbsrOy64l833ab2", "M"), ("Jawad", "PmGnwGtnBs40iau7JfoF", "M"),
         ("Radi", "eTfPFOvJJdhsKezAqEZm", "M"), ("Hamid", "A9ATTqUUQ6GHu0coCz8t", "M"),
-        ("Houssam", "NMWQDQipWXm8HlCLKapi", "M"), ("Ali", "5lXEHh42xcasVuJofypc", "M"),
-        ("Anas", "JyOZ8fOJkYGmajIlFsJ4", "M"), ("Khalil", "NrhVFquWMOHTRNOAY8AO", "M"),
-        ("Yassine", "H6pm0ljbvfqt4fzJd9Py", "M"), ("Rachid", "0Up3glsGKvZx3M5JI0XB", "M"),
-        ("Mehdi", "Vsm8jlUqY4LxvQNtr7R6", "M"), ("Abdelhadi", "cdfQ4039m26btcsBkvxH", "M")]
+        ("Abdelhadi", "cdfQ4039m26btcsBkvxH", "M")]
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
