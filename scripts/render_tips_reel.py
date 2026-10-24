@@ -216,7 +216,7 @@ OFFICE_NOISE = {"accountant", "accounting", "financial", "finance", "chart", "ch
 
 def concept_queries(line):
     """Stock queries for the first real-estate term spoken in the line (earliest match wins)."""
-    text = TAG.sub(" ", line or "")
+    text = NORM.sub("", TAG.sub(" ", line or ""))   # harakat are for the voice only
     best = None
     for pat, qs in CONCEPTS:
         # whole words only (optional و/ف/ب/ل/ك prefix and pronoun suffix), so "معقد" never matches "عقد"
@@ -449,10 +449,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         who = ROLE_AR.get(s.get("speaker") or "narrator", "")
         if who and s.get("dialogue"):
             add(2, t0, t1, "Who", r"{\fad(100,100)}" + who)
-        # reference style: no punctuation on screen, only words
-        words = [(w.strip("،,.!؟?:;…\"'«»"), a + t0, b + t0) for w, a, b in s["words"] if esc(w.strip("،,.!؟?:;…\"'«»"))]
+        # reference style: no punctuation and no harakat on screen (the harakat only guide the voice)
+        words = [(NORM.sub("", w).strip("،,.!؟?:;…\"'«»"), a + t0, b + t0) for w, a, b in s["words"] if esc(w.strip("،,.!؟?:;…\"'«»"))]
         marks = keyword_marks(words, s.get("keywords"))
-        raw = [w for w, _, _ in s["words"] if esc(w.strip("،,.!؟?:;…\"'«»"))]
+        raw = [NORM.sub("", w) for w, _, _ in s["words"] if esc(NORM.sub("", w).strip("،,.!؟?:;…\"'«»"))]
         chunks, cur = [], []
         for i, w in enumerate(words):
             if ORDINAL.match(norm(w[0])):
