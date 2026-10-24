@@ -14,7 +14,7 @@ Plan (from Claude, built from the montage scenario validated in the TIPS PDF):
              "mood": "worry|happy|neutral|tension|relief", "sfx": "optional sound effect"}]}
 On screen (reference style 2026-10-24): fixed title pill on top for the whole video, round logo badge top-right,
 big captions of 2-3 words, keywords in brand gold, ordinal words (اولا، ثانيا...) alone and bigger.
-Env: ELEVENLABS_API_KEY, PIXABAY_API_KEY, PEXELS_API_KEY (all optional: without them the reel falls back to
+Env: ELEVENLABS_API_KEY, PIXABAY_API_KEY, COVERR_API_KEY, PEXELS_API_KEY (all optional: without them the reel falls back to
 estimated timing / brand backgrounds, so a render never fails because of an external service).
 Prints one JSON line: {"seconds", "voice_ok", "voices", "credits_left", "visuals"}.
 """
@@ -334,6 +334,59 @@ def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
     return None
 
 
+COVERR_BUDGET = [22]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
+
+
+def coverr_pick(query, key, used, want, workdir, idx, avoid=()):
+    """Coverr (COVERR_API_KEY, free demo tier): curated professional footage, mostly 16:9 (cropped to 9:16)."""
+    if not key or not query or COVERR_BUDGET[0] <= 0:
+        return None
+    words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
+    # Coverr search matches short phrases only (3+ words usually return nothing): search 2-word slices
+    variants = [" ".join(words)] if len(words) <= 2 else [" ".join(words[:2]), " ".join(words[-2:])]
+    hits, seen = [], set()
+    for v in dict.fromkeys(variants):
+        if COVERR_BUDGET[0] <= 0:
+            break
+        COVERR_BUDGET[0] -= 1
+        try:
+            q = urllib.parse.urlencode({"query": v, "page_size": 25, "urls": "true", "sort": "popular"})
+            for h in json.loads(http("https://api.coverr.co/videos?" + q, headers={"Authorization": "Bearer " + key},
+                                     timeout=40)).get("hits") or []:
+                if h.get("id") not in seen:
+                    seen.add(h.get("id")); hits.append(h)
+        except Exception as e:
+            log("coverr failed", v, e)
+    need = min(2, len(words)) if words else 1
+    noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+    best = []
+    for h in hits:
+        toks = set(re.findall(r"[a-z]+", " ".join(h.get("tags") or []).lower() + " " + (h.get("title") or "").lower()))
+        url = (h.get("urls") or {}).get("mp4") or (h.get("urls") or {}).get("mp4_download")
+        dur = h.get("duration") or 0
+        dur = dur / 1000.0 if dur > 1000 else dur
+        if not url or ("cv", h.get("id")) in used or toks & set(BAN) or toks & set(avoid) or toks & noise:
+            continue
+        if toks & HUMAN and not toks & PRO:
+            continue
+        if dur and dur < min(want, 4):
+            continue
+        sc = sum(1 for w in words if any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2))
+        if sc >= need:
+            best.append((sc + (0.5 if h.get("is_vertical") else 0), url, h))
+    best.sort(key=lambda b: -b[0])
+    for sc, url, h in best[:3]:
+        try:
+            dst = os.path.join(workdir, f"cv{idx:02d}.mp4")
+            open(dst, "wb").write(http(url, timeout=180))
+            used.add(("cv", h.get("id")))
+            log("visual", idx, "coverr", sc, query, "->", h.get("title"))
+            return dst, "video"
+        except Exception as e:
+            log("coverr download failed", e)
+    return None
+
+
 def brand_bg(dst):
     from PIL import Image, ImageDraw
     im = Image.new("RGB", (W, H))
@@ -516,6 +569,7 @@ def main():
     key = os.environ.get("ELEVENLABS_API_KEY", "")
     pkey = os.environ.get("PIXABAY_API_KEY", "")
     xkey = os.environ.get("PEXELS_API_KEY", "")
+    ckey = os.environ.get("COVERR_API_KEY", "")
     random.seed(a.run)
 
     # 1) voice per line
@@ -555,8 +609,10 @@ def main():
         # the montage scenario (validated by the owner in the PDF) decides the shot; spoken-term concepts are only a fallback
         qs = [match_gender(q, g) for q in [s.get("visual"), s.get("visual_alt")] + concept_queries(s.get("line"))[:2] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
-        for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
-            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
+        for k, q in enumerate(qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])):
+            # Coverr first (curated professional footage) for the scenario's own shots, then Pixabay, then Pexels
+            got = (coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) if k < 2 else None) \
+                or pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
             if got and got[1] != "video":        # a photo only if no free source has a matching clip
                 got = pexels_pick(q, xkey, used, s["dur"], a.work, i, avoid) or got
             elif not got:
