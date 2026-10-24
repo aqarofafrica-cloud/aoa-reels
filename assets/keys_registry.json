@@ -1,0 +1,9 @@
+{
+  "note": "AQAR OF AFRICA - credentials registry for the admin monitor. Names and expiry dates only, never a secret value.",
+  "keys": [
+    {"name": "Claude API (Make)", "where": "Make, scenarios Tips v2 and main bot", "expires": "2026-11-19"},
+    {"name": "Claude API (GitHub, AOA-REELS-GITHUB-VISION)", "where": "GitHub secret ANTHROPIC_API_KEY", "expires": "2026-11-23"},
+    {"name": "GitHub token (Make, GITHUB-AOA-REELS)", "where": "Make keychain", "expires": "2027-10-20"}
+  ],
+  "elevenlabs_min_credits": 5000
+}
