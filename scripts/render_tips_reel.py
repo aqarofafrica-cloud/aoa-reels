@@ -5,18 +5,23 @@ brand watermark and the brand end card (brand constitution 2026-10-23: trust and
 
 Usage: render_tips_reel.py --plan reel.json --out reel.mp4 --preview preview.mp4 --work DIR
                            [--music track.mp3] [--logo logo.png] [--voices assets/voices.json] [--run N]
-Plan (from Claude):
-{"mode": "solo|dialogue", "hook": "...", "scenes": [
-   {"speaker": "narrator|asker|expert|witness", "line": "Darija voice text", "title": "short on-screen headline",
-    "visual": "english stock query", "visual_alt": "fallback query", "mood": "worry|happy|neutral|tension|relief"}]}
-Env: ELEVENLABS_API_KEY, PIXABAY_API_KEY (both optional: without them the reel falls back to
+Plan (from Claude, built from the montage scenario validated in the TIPS PDF):
+{"mode": "solo|dialogue", "title": "fixed top title", "hook": "...", "music": "calm|warm|upbeat|energetic",
+ "cast": {"asker": "Loubna", "witness": "Hamid"},           # optional, names from assets/voices.json
+ "scenes": [{"speaker": "narrator|asker|expert|witness", "line": "Darija voice text",
+             "keywords": ["exact words of the line shown in the brand colour"],
+             "visual": "english stock query", "visual_alt": "fallback query",
+             "mood": "worry|happy|neutral|tension|relief", "sfx": "optional sound effect"}]}
+On screen (reference style 2026-10-24): fixed title pill on top for the whole video, round logo badge top-right,
+big captions of 2-3 words, keywords in brand gold, ordinal words (اولا، ثانيا...) alone and bigger.
+Env: ELEVENLABS_API_KEY, PIXABAY_API_KEY, PEXELS_API_KEY (all optional: without them the reel falls back to
 estimated timing / brand backgrounds, so a render never fails because of an external service).
 Prints one JSON line: {"seconds", "voice_ok", "voices", "credits_left", "visuals"}.
 """
 import argparse, base64, json, os, random, re, subprocess, sys, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from render_reel import end_card, brand_badge, badge_overlay
+from render_reel import end_card
 from render_video import ass_time, esc
 
 W, H, FPS = 1080, 1920, 30
@@ -24,7 +29,11 @@ END = 3.5
 PAD = 0.28            # silence after each line
 XF = 0.5              # soft dissolve between scenes (cinematic, calm rhythm)
 MUSIC_VOL = 0.16      # owner feedback 2026-10-23: music well under the voice-over (was 0.45)
-FONT = "DejaVu Sans"
+FONT = "Tajawal ExtraBold"   # assets/fonts (Google Fonts, OFL), Arabic + Latin
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts")
+GOLD_ASS, NAVY_ASS = "&H004BB0E8&", "&H00201209&"   # brand gold (232,176,75) / navy (9,18,32) in ASS BGR
+BADGE_D, BADGE_M = 190, 40
+ORDINAL = re.compile(r"^[وف]?(أولا|اولا|أولاً|ثانيا|ثانياً|ثالثا|ثالثاً|رابعا|رابعاً|خامسا|خامساً|سادسا|سابعا|ثامنا|تاسعا|عاشرا|وأخيرا|أخيرا|اخيرا)[،,.:!]?$")
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
 BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "quran", "koran", "mosque", "prayer", "islam",
        "muslim", "religion", "church", "bible", "christian", "cross", "god", "pray", "bikini", "lingerie", "alcohol", "beer",
@@ -66,8 +75,20 @@ def duration(path):
 
 
 # ---------------------------------------------------------------- voices
-def pick_voices(cfg, mode, run_no):
-    """The expert is always the agency voice (assets/voices.json "agency", fixed); the other characters rotate."""
+def pick_voices(cfg, mode, run_no, cast=None):
+    """The expert is always the agency voice (assets/voices.json "agency", fixed); the other characters are the ones
+    Claude cast in the montage scenario (only names present in voices.json are accepted), else they rotate."""
+    v = _pick_voices(cfg, mode, run_no)
+    if mode == "dialogue" and isinstance(cast, dict):
+        by = {x["name"].lower(): x for x in cfg.get("voices") or []}
+        for role in ("asker", "witness"):
+            x = by.get(str(cast.get(role) or "").strip().lower())
+            if x and x["id"] != v["expert"]["id"]:
+                v[role] = x
+    return v
+
+
+def _pick_voices(cfg, mode, run_no):
     narr = cfg.get("narrators") or []
     roles = cfg.get("roles") or {}
     rot = lambda lst, k=0: lst[(run_no + k) % len(lst)] if lst else None
@@ -244,7 +265,8 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
             cands.append((score(h), 0.0, "image", h, url))
     need = min(2, len(words)) if words else 1
     cands = [c for c in cands if c[0] >= need]
-    cands.sort(key=lambda c: (-(c[0] + c[1]), -c[3].get("likes", 0)))
+    # real footage first (reference style: moving video, photos only when no clip matches)
+    cands.sort(key=lambda c: (c[2] != "video", -(c[0] + c[1]), -c[3].get("likes", 0)))
     for sc, bonus, kind, h, url in cands[:4]:
         try:
             dst = os.path.join(workdir, f"{'v' if kind == 'video' else 'i'}{idx:02d}.{'mp4' if kind == 'video' else 'jpg'}")
@@ -254,6 +276,40 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
             return dst, kind
         except Exception as e:
             log("download failed", e)
+    return None
+
+
+def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
+    """Optional second free source (PEXELS_API_KEY): portrait videos only, tags read from the page slug."""
+    if not key or not query:
+        return None
+    try:
+        q = urllib.parse.urlencode({"query": query[:90], "orientation": "portrait", "per_page": 20})
+        vids = json.loads(http("https://api.pexels.com/videos/search?" + q, headers={"Authorization": key}, timeout=40)).get("videos") or []
+    except Exception as e:
+        log("pexels failed", query, e); return None
+    words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
+    need = min(2, len(words)) if words else 1
+    noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+    best = []
+    for h in vids:
+        toks = set(re.findall(r"[a-z]+", (h.get("url") or "").lower().rsplit("/video/", 1)[-1]))
+        if ("px", h["id"]) in used or toks & set(BAN) or toks & set(avoid) or toks & noise or (h.get("duration") or 0) < min(want, 5):
+            continue
+        sc = sum(1 for w in words if any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2))
+        files = [f for f in h.get("video_files") or [] if (f.get("height") or 0) > (f.get("width") or 0) and 1000 <= (f.get("height") or 0) <= 2000]
+        if sc >= need and files:
+            best.append((sc, min(files, key=lambda f: abs(f["height"] - 1920))["link"], h))
+    best.sort(key=lambda b: -b[0])
+    for sc, url, h in best[:3]:
+        try:
+            dst = os.path.join(workdir, f"p{idx:02d}.mp4")
+            open(dst, "wb").write(http(url, timeout=120))
+            used.add(("px", h["id"]))
+            log("visual", idx, "pexels", sc, query, "->", h.get("url"))
+            return dst, "video"
+        except Exception as e:
+            log("pexels download failed", e)
     return None
 
 
@@ -288,8 +344,67 @@ def scene_clip(src, kind, dur, mood, dst, first):
     run(cmd + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(FPS), dst])
 
 
-# ---------------------------------------------------------------- captions
-def build_ass(scenes, hook, total, path):
+# ---------------------------------------------------------------- brand layer
+def round_badge(logo, dst, d=BADGE_D):
+    """AQAR OF AFRICA logo inside a white round badge with a thin gold ring, visible on any footage."""
+    if not logo or not os.path.exists(logo):
+        return None
+    from PIL import Image, ImageDraw
+    k = 3                                   # supersampled, then reduced: smooth circle edge
+    D = d * k
+    im = Image.new("RGBA", (D, D), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(im)
+    dr.ellipse([0, 0, D - 1, D - 1], fill=(232, 176, 75, 255))
+    ring = int(D * 0.035)
+    dr.ellipse([ring, ring, D - 1 - ring, D - 1 - ring], fill=(255, 255, 255, 250))
+    lg = Image.open(logo).convert("RGBA")
+    box = D * 0.64
+    sc = min(box / lg.width, box / lg.height)
+    lg = lg.resize((int(lg.width * sc), int(lg.height * sc)), Image.LANCZOS)
+    im.alpha_composite(lg, ((D - lg.width) // 2, (D - lg.height) // 2 + int(D * 0.01)))
+    im.resize((d, d), Image.LANCZOS).save(dst)
+    return dst
+
+
+def text_width(text, size):
+    try:
+        from PIL import ImageFont
+        eng = ImageFont.Layout.RAQM if ImageFont.core.HAVE_RAQM else ImageFont.Layout.BASIC
+        f = ImageFont.truetype(os.path.join(FONTS_DIR, "Tajawal-ExtraBold.ttf"), size, layout_engine=eng)
+        return f.getlength(text)
+    except Exception:
+        return 0.5 * size * len(text)
+
+
+def pill(w, h, r):
+    """ASS vector drawing of a rounded rectangle (w x h, radius r)."""
+    return (f"m {r} 0 l {w - r} 0 b {w} 0 {w} 0 {w} {r} l {w} {h - r} b {w} {h} {w} {h} {w - r} {h} "
+            f"l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0")
+
+
+NORM = re.compile(r"[ً-ْـ]")
+PUNCT = "،,.!؟?:;\"'«»()…-"
+
+
+def norm(w):
+    return NORM.sub("", w).strip(PUNCT).replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+
+
+def keyword_marks(words, keywords):
+    """Indices of the spoken words that belong to one of the scene keywords (exact phrase, in order)."""
+    toks = [norm(w[0]) for w in words]
+    marks = set()
+    for kw in keywords or []:
+        kt = [norm(x) for x in TAG.sub(" ", str(kw)).split() if norm(x)]
+        if not kt:
+            continue
+        for i in range(len(toks) - len(kt) + 1):
+            if toks[i:i + len(kt)] == kt:
+                marks.update(range(i, i + len(kt)))
+    return marks
+
+
+def build_ass(scenes, title, total, path, body):
     head = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -299,40 +414,60 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{FONT},74,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H96000000&,1,0,0,0,100,100,0,0,1,6,2,2,70,70,520,-1
-Style: Hook,{FONT},96,&H00FFFFFF&,&H00FFFFFF&,&H0020120C&,&H64000000&,1,0,0,0,100,100,0,0,1,8,3,5,70,70,0,1
-Style: Title,{FONT},58,&H0020120C&,&H0020120C&,&H004BB0E8&,&H00000000&,1,0,0,0,100,100,0,0,3,20,0,8,80,80,252,1
-Style: Who,{FONT},46,&H004BB0E8&,&H004BB0E8&,&H00000000&,&H00000000&,1,0,0,0,100,100,0,0,1,4,0,2,70,70,760,1
+Style: Cap,{FONT},98,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H80000000&,0,0,0,0,100,100,0,0,1,7,3,2,60,60,640,-1
+Style: Ord,{FONT},124,{GOLD_ASS},{GOLD_ASS},&H00000000&,&H80000000&,0,0,0,0,100,100,0,0,1,8,3,2,60,60,640,-1
+Style: Title,{FONT},62,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,-1
+Style: Box,{FONT},20,{NAVY_ASS},{NAVY_ASS},{GOLD_ASS},&H00000000&,0,0,0,0,100,100,0,0,1,3,0,7,0,0,0,1
+Style: Who,{FONT},46,{GOLD_ASS},{GOLD_ASS},&H00000000&,&H00000000&,0,0,0,0,100,100,0,0,1,4,0,2,60,60,800,-1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     ev = []
     add = lambda layer, a, b, st, tx: ev.append(f"Dialogue: {layer},{ass_time(a)},{ass_time(b)},{st},,0,0,0,,{tx}")
-    if hook:
-        add(3, 0.0, min(2.6, scenes[0]["dur"]), "Hook", r"{\fad(350,400)}" + esc(hook))
+    # fixed title pill on top, whole body (reference: the topic stays on screen from the first to the last second)
+    title = re.sub(r"\s+", " ", TAG.sub(" ", title or "")).strip()
+    if title:
+        size = 62
+        while size > 40 and text_width(title, size) > W - 2 * BADGE_M - 2 * BADGE_D - 40:
+            size -= 2
+        tw = min(W - 80, max(320, int(text_width(title, size) + 2 * 46)))
+        th = int(size * 1.75)
+        ty = BADGE_M + BADGE_D + 34
+        x0 = (W - tw) // 2
+        add(4, 0, body, "Box", r"{\an7\pos(%d,%d)\1a&H22&\fad(300,0)\p1}" % (x0, ty) + pill(tw, th, th // 2) + r"{\p0}")
+        add(5, 0, body, "Title", r"{\an5\pos(%d,%d)\fs%d\fad(300,0)}" % (W // 2, ty + th // 2 + 2, size) + esc(title))
     for s in scenes:
         t0, t1 = s["t0"], s["t0"] + s["dur"]
-        if s.get("title") and not (s is scenes[0] and hook):
-            add(2, t0 + 0.05, t1 - 0.05, "Title", r"{\fad(150,150)}" + esc(s["title"]))
         who = ROLE_AR.get(s.get("speaker") or "narrator", "")
         if who and s.get("dialogue"):
             add(2, t0, t1, "Who", r"{\fad(100,100)}" + who)
-        words = [(esc(w), a + t0, b + t0) for w, a, b in s["words"] if esc(w)]
+        # reference style: no punctuation on screen, only words
+        words = [(w.strip("،,.!؟?:;…\"'«»"), a + t0, b + t0) for w, a, b in s["words"] if esc(w.strip("،,.!؟?:;…\"'«»"))]
+        marks = keyword_marks(words, s.get("keywords"))
+        raw = [w for w, _, _ in s["words"] if esc(w.strip("،,.!؟?:;…\"'«»"))]
         chunks, cur = [], []
-        for w in words:
-            cur.append(w)
-            if len(cur) >= 4 or re.search(r"[.!؟?،,]$", w[0]):
+        for i, w in enumerate(words):
+            if ORDINAL.match(norm(w[0])):
+                if cur:
+                    chunks.append(cur); cur = []
+                chunks.append([(i, w, True)])
+                continue
+            cur.append((i, w, False))
+            chars = sum(len(x[1][0]) for x in cur)
+            if len(cur) >= 3 or chars >= 16 or (i + 1 < len(raw) and re.search(r"[.!؟?،,:]$", raw[i])):
                 chunks.append(cur); cur = []
         if cur:
             chunks.append(cur)
         for ci, ch in enumerate(chunks):
-            c_end = chunks[ci + 1][0][1] if ci + 1 < len(chunks) else t1
-            for wi, (w, a, b) in enumerate(ch):
-                nxt = ch[wi + 1][1] if wi + 1 < len(ch) else c_end
-                txt = " ".join(r"{\c&H004BB0E8&}" + x + r"{\c&H00FFFFFF&}" if k == wi else x
-                               for k, (x, _, _) in enumerate(ch))
-                add(1, a, max(nxt, a + 0.05), "Cap", txt)
+            a = ch[0][1][1]
+            b = chunks[ci + 1][0][1][1] if ci + 1 < len(chunks) else t1
+            if ch[0][2]:
+                add(1, a, max(b, a + 0.4), "Ord", r"{\fad(80,0)\fscx88\fscy88\t(0,140,\fscx100\fscy100)}" + esc(ch[0][1][0]))
+                continue
+            txt = " ".join((r"{\c" + GOLD_ASS + "}" + esc(w[0]) + r"{\c&H00FFFFFF&}") if i in marks else esc(w[0])
+                           for i, w, _ in ch)
+            add(1, a, max(b, a + 0.25), "Cap", r"{\fad(60,0)\fscx94\fscy94\t(0,120,\fscx100\fscy100)}" + txt)
     open(path, "w", encoding="utf-8").write(head + "\n".join(ev) + "\n")
 
 
@@ -356,9 +491,10 @@ def main():
     mode = "dialogue" if plan.get("mode") == "dialogue" else "solo"
     cfg = json.load(open(a.voices, encoding="utf-8"))
     model = "eleven_v4"          # owner decision 2026-10-23: only Eleven v4 voices (v3 / multilingual v2 banned)
-    voices = pick_voices(cfg, mode, a.run)
+    voices = pick_voices(cfg, mode, a.run, plan.get("cast"))
     key = os.environ.get("ELEVENLABS_API_KEY", "")
     pkey = os.environ.get("PIXABAY_API_KEY", "")
+    xkey = os.environ.get("PEXELS_API_KEY", "")
     random.seed(a.run)
 
     # 1) voice per line
@@ -399,6 +535,10 @@ def main():
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
             got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
+            if got and got[1] != "video":        # a photo only if no free source has a matching clip
+                got = pexels_pick(q, xkey, used, s["dur"], a.work, i, avoid) or got
+            elif not got:
+                got = pexels_pick(q, xkey, used, s["dur"], a.work, i, avoid)
             if got:
                 break
         got = got or brand_bg(os.path.join(a.work, f"bg{i:02d}.jpg"))
@@ -428,12 +568,13 @@ def main():
 
     # 3) captions + progress bar
     ass = os.path.join(a.work, "caps.ass")
-    build_ass(scenes, (plan.get("hook") or "").strip(), total, ass)
+    build_ass(scenes, (plan.get("title") or plan.get("hook") or "").strip(), total, ass, body)
     vtx = os.path.join(a.work, "vtx.mp4")
     bar = f"color=c=0xE8B04B:s={W}x12:r={FPS}"
-    badge = brand_badge(a.logo, os.path.join(a.work, "badge.png"))
-    fc = f"[0:v]ass={ass}[c];[c][1:v]overlay=x='-W+W*t/{body:.2f}':y=0:enable='lt(t,{body:.2f})':shortest=1"
-    fc = fc + ("[pb];" + badge_overlay("pb", 2, body, "v") if badge else "[v]")
+    badge = round_badge(a.logo, os.path.join(a.work, "badge.png"))
+    fc = (f"[0:v]ass={ass}:fontsdir={os.path.abspath(FONTS_DIR)}[c];"
+          f"[c][1:v]overlay=x='-W+W*t/{body:.2f}':y=0:enable='lt(t,{body:.2f})':shortest=1")
+    fc = fc + (f"[pb];[pb][2:v]overlay=x=W-w-{BADGE_M}:y={BADGE_M}:enable='lt(t,{body:.2f})'[v]" if badge else "[v]")
     run(["ffmpeg", "-y", "-i", vid, "-f", "lavfi", "-i", bar, *(["-i", badge] if badge else []), "-filter_complex", fc,
          "-map", "[v]", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), vtx])
 
@@ -480,7 +621,7 @@ def main():
     run(["ffmpeg", "-y", "-i", a.out, "-vf", "scale=720:1280", "-c:v", "libx264", "-preset", "medium", "-crf", "30",
          "-maxrate", "1100k", "-bufsize", "2200k", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", a.preview])
     print(json.dumps({"seconds": round(total, 1), "voice_ok": voice_ok, "mode": mode,
-                      "voices": sorted({v["name"] for v in voices.values() if v}),
+                      "voices": sorted({(voices.get(s.get("speaker") or "narrator") or voices["narrator"])["name"] for s in scenes}),
                       "credits_left": credits_left(key) if key else None, "visuals": kinds}, ensure_ascii=False))
 
 

@@ -10,7 +10,10 @@ The text follows the advice-project format:
 import argparse, base64, html, os, re
 from weasyprint import HTML
 
-LABELS = ["العنوان", "الشرح", "المثال", "القانون", "الواقع", "إلا وقع المشكل"]
+LABELS = ["العنوان", "الشرح", "المثال", "القانون", "الواقع", "إلا وقع المشكل",
+          # montage scenario (2026-10-24): validated by the owner in this PDF, then followed exactly by the reel
+          "العنوان الثابت", "الشكل", "الأصوات", "الموسيقى", "المدة التقريبية",
+          "الصوت", "الكلام", "الكلمات الملونة", "اللقطة", "الإحساس", "مؤثر صوتي"]
 PHONE = "+212 660 96 66 20"
 BRAND = "AQAR OF AFRICA"
 
@@ -28,6 +31,8 @@ h1 { font-size: 21pt; color: #0c1220; margin: 6px 0 14px; line-height: 1.4; }
 h2 { font-size: 15pt; color: #0c1220; background: #f6efe0; border-right: 5px solid #e8b04b; padding: 4px 10px; margin: 20px 0 8px; page-break-after: avoid; }
 p { margin: 4px 0 8px; text-align: justify; }
 p.lab b { color: #a8761c; }
+h2.scn { page-break-before: always; background: #0c1220; color: #e8b04b; border-right-color: #e8b04b; }
+h3 { font-size: 12.5pt; color: #0c1220; border-bottom: 1px solid #e8d7b0; margin: 14px 0 4px; padding-bottom: 2px; page-break-after: avoid; }
 ol { margin: 4px 22px 8px 0; padding: 0; }
 li { margin-bottom: 6px; }
 .verify { border: 1px dashed #b9c2d0; background: #f7f9fc; padding: 6px 12px; border-radius: 6px; font-size: 11pt; }
@@ -55,6 +60,10 @@ def to_html(text, logo, date):
             continue
         if re.match(r"^النصيحة\s*:", line):
             close_list(); out.append(f"<h1>{inline(line.split(':', 1)[1].strip())}</h1>"); continue
+        if line.startswith("سيناريو المونتاج"):
+            close_list(); out.append('<h2 class="scn">سيناريو المونتاج ديال الريل</h2>'); continue
+        if re.match(r"^المشهد\s+\d+\s*$", line):
+            close_list(); out.append(f'<h3>{inline(line)}</h3>'); continue
         if re.match(r"^النصيحة\s+\d+\s*$", line) or line in ("الخلاصة",):
             close_list(); out.append(f"<h2>{inline(line)}</h2>"); continue
         if line.startswith("نقط للتحقق"):
@@ -72,7 +81,7 @@ def to_html(text, logo, date):
         if line.startswith("- ["):
             close_list(); out.append(f'<p class="src">{inline(line[2:])}</p>'); continue
         close_list()
-        lab = next((l for l in LABELS if line.startswith(l + ":") or line.startswith(l + " :")), None)
+        lab = next((l for l in sorted(LABELS, key=len, reverse=True) if line.startswith(l + ":") or line.startswith(l + " :")), None)
         if lab:
             body = line.split(":", 1)[1].strip()
             out.append(f'<p class="lab"><b>{lab}:</b> {inline(body)}</p>')

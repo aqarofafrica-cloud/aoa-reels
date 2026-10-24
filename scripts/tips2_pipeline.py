@@ -75,13 +75,18 @@ def logo_file():
     return "work/logo.png"
 
 
-def music_file():
-    # advice reels: calm cinematic tracks only (brand constitution), property reels keep assets/tracks.txt
-    src = "assets/tracks_calm.txt" if os.path.exists("assets/tracks_calm.txt") else "assets/tracks.txt"
-    tracks = [l.strip().split("|", 1) for l in open(src) if l.strip() and not l.startswith("#")]
-    name, url = tracks[RUN % len(tracks)]
+MOODS = {"calm": "calm", "serious": "calm", "warm": "warm", "trust": "warm", "upbeat": "upbeat", "happy": "upbeat",
+         "energetic": "energetic", "excited": "energetic", "hype": "energetic"}
+
+
+def music_file(mood=None):
+    """Advice reels: the property-montage tracks, picked by the mood Claude chose for this tip (assets/tracks_tips.txt)."""
+    rows = [l.strip().split("|", 2) for l in open("assets/tracks_tips.txt", encoding="utf-8") if l.strip() and not l.startswith("#")]
+    want = MOODS.get(str(mood or "").strip().lower(), "warm")
+    pool = [r for r in rows if r[1] == want] or rows
+    name, _, url = pool[RUN % len(pool)]
     try:
-        return name, vp.fetch(url, "work/music.mp3")
+        return f"{name} ({want})", vp.fetch(url, "work/music.mp3")
     except Exception as e:
         vp.log("music failed", e)
         return "none", None
@@ -109,7 +114,7 @@ def do_render(job, p, cb):
     json.dump(plan, open("work/plan.json", "w", encoding="utf-8"), ensure_ascii=False)
     json.dump(reel, open("work/reel.json", "w", encoding="utf-8"), ensure_ascii=False)
     logo = logo_file()
-    track, music = music_file()
+    track, music = music_file(reel.get("music"))
     # cards: carousel 1080x1350 + story 1080x1920 (render_tips keeps cover + <=8 tips + agency card)
     cmd = ["python3", "scripts/render_tips.py", "--plan", "work/plan.json", "--out", "work/cards", "--logo", logo]
     info = json.loads(subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True).stdout.strip().splitlines()[-1])
