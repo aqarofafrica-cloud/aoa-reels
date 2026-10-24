@@ -518,8 +518,12 @@ def vision_visual(s, qs, keys, used, workdir, idx, avoid):
     """Candidates per query (Coverr + Pixabay), Claude picks; downloads only the chosen clip."""
     ckey, pkey, akey = keys
     shot = " / ".join(q for q in qs[:2] if q)
-    for q in qs[:3]:
-        cands = coverr_candidates(q, ckey, used, s["dur"], avoid) + pixabay_candidates(q, pkey, used, s["dur"], avoid)
+    # the scenario's own shots first, then broader professional shots; Claude must approve one (no blind fallback)
+    pool = list(dict.fromkeys([q for q in qs if q] + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])
+                              + ["business meeting office", "real estate agent client", "business handshake"]))
+    for k, q in enumerate(pool[:6]):
+        cands = (coverr_candidates(q, ckey, used, s["dur"], avoid) if k < 3 else []) \
+            + pixabay_candidates(q, pkey, used, s["dur"], avoid)
         ids, uniq = set(), []
         for c in cands:
             if c["id"] not in ids:
