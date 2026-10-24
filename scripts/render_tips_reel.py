@@ -613,9 +613,11 @@ def main():
         qs = [match_gender(q, g) for q in [s.get("visual"), s.get("visual_alt")] + concept_queries(s.get("line"))[:2] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for k, q in enumerate(qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])):
-            # Coverr first (curated professional footage) for the scenario's own shots, then Pixabay, then Pexels
-            got = (coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) if k < 2 else None) \
-                or pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
+            # Pixabay first (test 2026-10-24: its matches fit the spoken idea better); Coverr only when Pixabay has
+            # no matching video clip for the scenario's own shots, then Pexels
+            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
+            if k < 2 and (not got or got[1] != "video"):
+                got = coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) or got
             if got and got[1] != "video":        # a photo only if no free source has a matching clip
                 got = pexels_pick(q, xkey, used, s["dur"], a.work, i, avoid) or got
             elif not got:
