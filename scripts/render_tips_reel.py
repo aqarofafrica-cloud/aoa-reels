@@ -482,22 +482,42 @@ def pixabay_candidates(query, key, used, want, avoid=()):
     return out[:4]
 
 
+def _thumb_block(url):
+    """Thumbnails are sent as base64 (an unreachable URL made the whole Claude call fail with HTTP 400)."""
+    try:
+        data = http(url, timeout=20)
+        if len(data) < 500:
+            return None
+        mt = "image/png" if data[:4] == b"\x89PNG" else "image/webp" if data[8:12] == b"WEBP" else "image/jpeg"
+        return {"type": "image", "source": {"type": "base64", "media_type": mt, "data": base64.b64encode(data).decode()}}
+    except Exception:
+        return None
+
+
 def vision_pick(line, shot, cands, akey):
     """Ask Claude which thumbnail shows the spoken idea. Returns the chosen candidate or None."""
     if not akey or not cands:
+        return None
+    blocks, kept = [], []
+    for c in cands:
+        b = _thumb_block(c["thumb"])
+        if b:
+            blocks.append((len(kept), b)); kept.append(c)
+    if not kept:
         return None
     content = [{"type": "text", "text": (
         "أنت مونتير محترف لريلز تعليمية ديال وكالة عقارية مغربية (دورة تدريبية مصغرة، ستيل الثقة والرسميات).\n"
         f"الجملة اللي كيقولها الصوت فهاد المشهد: {NORM.sub('', TAG.sub(' ', line or '')).strip()}\n"
         f"اللقطة المطلوبة فالسيناريو: {shot}\n"
         + ("لقطات ديجا مستعملة فالريل (ما تختارش نفس المشهد ولا نفس الشخص): " + " | ".join(VISION_USED[-8:]) + "\n" if VISION_USED else "")
-        + "هادي صور من فيديوهات مرشحة، مرقمة بالترتيب. اختار الرقم ديال اللقطة اللي كتبين بالضبط الفكرة اللي كتقال، "
-          "فيها ناس فسياق مهني (كومبلي، لباس إداري أنيق، مكتب، توقيع، وثائق، مفاتيح، زيارة عقار) ولا شيء مرتبط مباشرة بالجملة. "
-          "ارفض: حواسيب وكلافيي بوحدهم، ناس بلباس كاجوال ولا فالزنقة، رياضة، توصيل، حياة خاصة، رسوم ولا صور مولدة، كتابة مقروءة. "
+        + "هادي صور من فيديوهات مرشحة، مرقمة بالترتيب. اختار الرقم ديال أحسن لقطة كتعبر على الفكرة اللي كتقال ولا على أجواءها المهنية "
+          "(ناس بكومبلي ولا لباس إداري أنيق، مكتب، اجتماع، توقيع، وثائق، مفاتيح، مصافحة، زيارة عقار، دار ولا عمارة). "
+          "ماشي ضروري تكون حرفية، المهم تكون مهنية وكتناسب المعنى. "
+          "ارفض غير: حواسيب وكلافيي وفأرة بوحدهم، ناس بلباس كاجوال ولا فالزنقة، رياضة، توصيل، حياة خاصة، رسوم ولا صور مولدة، كتابة مقروءة واضحة. "
           "إلا حتى وحدة ما كتصلح، جاوب -1. جاوب غير بـ JSON: {\"pick\": رقم, \"why\": \"سبب قصير\"}")}]
-    for n, c in enumerate(cands):
+    for n, b in blocks:
         content.append({"type": "text", "text": f"اللقطة {n}:"})
-        content.append({"type": "image", "source": {"type": "url", "url": c["thumb"]}})
+        content.append(b)
     body = {"model": VISION_MODEL, "max_tokens": 200, "messages": [{"role": "user", "content": content}]}
     try:
         raw = http("https://api.anthropic.com/v1/messages", "POST",
@@ -508,27 +528,33 @@ def vision_pick(line, shot, cands, akey):
         j = json.loads(m.group(0)) if m else {}
         n = int(j.get("pick", -1))
         log("vision", shot, "->", n, j.get("why", "")[:120])
-        return cands[n] if 0 <= n < len(cands) else None
+        return kept[n] if 0 <= n < len(kept) else None
     except Exception as e:
         log("vision failed", e)
         return None
 
 
+VISION_APPROVED = []   # clips Claude already approved in this reel: last resort instead of a blind keyword pick
+
+
 def vision_visual(s, qs, keys, used, workdir, idx, avoid):
-    """Candidates per query (Coverr + Pixabay), Claude picks; downloads only the chosen clip."""
+    """Candidates from 2 queries at a time (Coverr + Pixabay, up to 8 thumbnails), Claude picks; downloads only the
+    chosen clip. If Claude rejects everything, reuse an approved clip of this reel (another moment of it) rather than
+    an unchecked keyword match."""
     ckey, pkey, akey = keys
     shot = " / ".join(q for q in qs[:2] if q)
-    # the scenario's own shots first, then broader professional shots; Claude must approve one (no blind fallback)
     pool = list(dict.fromkeys([q for q in qs if q] + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])
                               + ["business meeting office", "real estate agent client", "business handshake"]))
-    for k, q in enumerate(pool[:6]):
-        cands = (coverr_candidates(q, ckey, used, s["dur"], avoid) if k < 3 else []) \
-            + pixabay_candidates(q, pkey, used, s["dur"], avoid)
+    for k in range(0, min(len(pool), 6), 2):
+        cands = []
+        for j, q in enumerate(pool[k:k + 2]):
+            cands += (coverr_candidates(q, ckey, used, s["dur"], avoid) if k + j < 3 else []) \
+                + pixabay_candidates(q, pkey, used, s["dur"], avoid)
         ids, uniq = set(), []
         for c in cands:
             if c["id"] not in ids:
                 ids.add(c["id"]); uniq.append(c)
-        c = vision_pick(s.get("line"), shot, uniq[:6], akey)
+        c = vision_pick(s.get("line"), shot, uniq[:8], akey)
         if not c:
             continue
         try:
@@ -536,10 +562,15 @@ def vision_visual(s, qs, keys, used, workdir, idx, avoid):
             open(dst, "wb").write(http(c["url"], timeout=180))
             used.add(c["id"])
             VISION_USED.append(c["text"][:60])
-            log("visual", idx, c["src"], "vision", q, "->", c["text"])
+            VISION_APPROVED.append(dst)
+            log("visual", idx, c["src"], "vision", pool[k], "->", c["text"])
             return dst, "video"
         except Exception as e:
             log("vision download failed", e)
+    if VISION_APPROVED:
+        pick = VISION_APPROVED[idx % len(VISION_APPROVED)]
+        log("visual", idx, "reuse approved clip", pick)
+        return pick, "video"
     return None
 
 
