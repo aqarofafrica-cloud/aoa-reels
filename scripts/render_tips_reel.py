@@ -334,19 +334,38 @@ def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
     return None
 
 
-COVERR_BUDGET = [22]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
+COVERR_BUDGET = [24]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
+# Coverr also hosts AI / abstract renders and lifestyle clips: never for an advice lesson
+COVERR_BAN = {"ai", "generated", "abstract", "render", "rendering", "cgi", "animation", "animated", "3d", "egg", "sculpture",
+              "art", "artistic", "surreal", "fantasy", "neon", "hologram", "futuristic", "skateboard", "skate", "selfie",
+              "hipster", "teenager", "teen", "student", "students", "casual", "streetwear", "dance", "dancing", "music",
+              "concert", "travel", "vacation", "beach", "surf", "sport", "running", "yoga", "fitness", "gaming", "game"}
+# objects / actions that carry the meaning of an advice line (what is SAID must be SEEN)
+MEANING = {"sign", "signing", "signature", "contract", "contracts", "document", "documents", "paper", "papers", "papers",
+           "notary", "lawyer", "keys", "key", "handshake", "shaking", "meeting", "consultation", "explaining", "explain",
+           "reading", "calculating", "calculator", "money", "cash", "payment", "paying", "bank", "loan", "house", "home",
+           "apartment", "property", "building", "construction", "architect", "blueprint", "plan", "plans", "visit",
+           "showing", "tour", "agent", "realtor", "office", "desk", "worried", "stress", "thinking", "smiling", "couple",
+           "family", "client", "clients", "stamp", "stamping", "folder", "file", "tax", "taxes", "deal", "agreement"}
+
+
+def _sig(title):
+    return set(w for w in re.findall(r"[a-z]+", (title or "").lower()) if len(w) > 3)
 
 
 def coverr_pick(query, key, used, want, workdir, idx, avoid=()):
-    """Coverr (COVERR_API_KEY, free demo tier): curated professional footage, mostly 16:9 (cropped to 9:16)."""
+    """Coverr (COVERR_API_KEY, free demo tier): curated professional footage, mostly 16:9 (cropped to 9:16).
+    Relevance (owner 2026-10-24: the voice-over decides the shot): a clip must match the meaning word of the
+    scenario's shot (object / action, not only "businessman"), read from its title + description + tags,
+    and never repeat the same actor series already used in the reel."""
     if not key or not query or COVERR_BUDGET[0] <= 0:
         return None
     words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
     # Coverr search matches short phrases only (3+ words usually return nothing): search 2-word slices
-    variants = [" ".join(words)] if len(words) <= 2 else [" ".join(words[:2]), " ".join(words[-2:])]
+    variants = [" ".join(words)] if len(words) <= 2 else [" ".join(words[:2]), " ".join(words[-2:]), words[-1]]
     hits, seen = [], set()
     for v in dict.fromkeys(variants):
-        if COVERR_BUDGET[0] <= 0:
+        if COVERR_BUDGET[0] <= 0 or len(hits) >= 40:
             break
         COVERR_BUDGET[0] -= 1
         try:
@@ -357,33 +376,46 @@ def coverr_pick(query, key, used, want, workdir, idx, avoid=()):
                     seen.add(h.get("id")); hits.append(h)
         except Exception as e:
             log("coverr failed", v, e)
-    need = min(2, len(words)) if words else 1
+    meaning = [w for w in words if any(w.startswith(m[:5]) or m.startswith(w[:5]) for m in MEANING) and not PERSON.search(w)]
     noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+    used_sigs = [x[1] for x in used if isinstance(x, tuple) and len(x) == 2 and x[0] == "cvsig"]
     best = []
     for h in hits:
-        toks = set(re.findall(r"[a-z]+", " ".join(h.get("tags") or []).lower() + " " + (h.get("title") or "").lower()))
+        text = " ".join([h.get("title") or "", h.get("description") or "", " ".join(h.get("tags") or [])]).lower()
+        toks = set(re.findall(r"[a-z]+", text))
         url = (h.get("urls") or {}).get("mp4") or (h.get("urls") or {}).get("mp4_download")
         try:
             dur = float(h.get("duration") or 0)      # Coverr returns seconds as a string ("22.022000")
         except (TypeError, ValueError):
             dur = 0.0
         dur = dur / 1000.0 if dur > 1000 else dur
-        if not url or ("cv", h.get("id")) in used or toks & set(BAN) or toks & set(avoid) or toks & noise:
+        # in Coverr descriptions "signs" is the verb (signs a contract), not signage
+        if not url or ("cv", h.get("id")) in used or toks & (set(BAN) - {"sign", "signs"}) or toks & COVERR_BAN \
+                or toks & set(avoid) or toks & noise:
             continue
         if toks & HUMAN and not toks & PRO:
             continue
         if dur and dur < min(want, 4):
             continue
-        sc = sum(1 for w in words if any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2))
-        if sc >= need:
-            best.append((sc + (0.5 if h.get("is_vertical") else 0), url, h))
+        sig = _sig(h.get("title"))
+        if any(len(sig & u) >= max(2, int(0.6 * min(len(sig), len(u)))) for u in used_sigs if u):
+            continue                                  # same actor / same series as a clip already in the reel
+        hit = lambda w: any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks if len(t) > 2)
+        if meaning and not any(hit(w) for w in meaning):
+            continue                                  # the clip must show the idea spoken, not just "a person"
+        sc = sum(1 for w in words if hit(w)) + 2 * sum(1 for w in meaning if hit(w))
+        sc += 0.5 if h.get("is_vertical") else 0
+        sc += 0.5 * len(toks & PRO)
+        if sum(1 for w in words if hit(w)) >= min(2, len(words)):
+            best.append((sc, url, h, sig))
     best.sort(key=lambda b: -b[0])
-    for sc, url, h in best[:3]:
+    for sc, url, h, sig in best[:3]:
         try:
             dst = os.path.join(workdir, f"cv{idx:02d}.mp4")
             open(dst, "wb").write(http(url, timeout=180))
             used.add(("cv", h.get("id")))
-            log("visual", idx, "coverr", sc, query, "->", h.get("title"))
+            used.add(("cvsig", frozenset(sig)))
+            log("visual", idx, "coverr", round(sc, 1), query, "->", h.get("title"))
             return dst, "video"
         except Exception as e:
             log("coverr download failed", e)
@@ -613,11 +645,10 @@ def main():
         qs = [match_gender(q, g) for q in [s.get("visual"), s.get("visual_alt")] + concept_queries(s.get("line"))[:2] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for k, q in enumerate(qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"])):
-            # Pixabay first (test 2026-10-24: its matches fit the spoken idea better); Coverr only when Pixabay has
-            # no matching video clip for the scenario's own shots, then Pexels
-            got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
-            if k < 2 and (not got or got[1] != "video"):
-                got = coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) or got
+            # owner 2026-10-24: the Coverr reel (reftest5) is the reference style -> Coverr first for the scenario's own
+            # shots, Pixabay when Coverr has no clip that shows the spoken idea, then Pexels
+            got = (coverr_pick(q, ckey, used, s["dur"], a.work, i, avoid) if k < 3 else None) \
+                or pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
             if got and got[1] != "video":        # a photo only if no free source has a matching clip
                 got = pexels_pick(q, xkey, used, s["dur"], a.work, i, avoid) or got
             elif not got:
