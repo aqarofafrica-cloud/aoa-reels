@@ -10,7 +10,7 @@ failed GitHub workflow runs. No secret value is ever written to the status file 
 import datetime as dt, hashlib, json, os, shutil, subprocess, urllib.request, urllib.error
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "aqarofafrica-cloud/aoa-reels")
-UA = {"User-Agent": "aoa-health"}
+UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}   # some APIs (Coverr) refuse unknown agents with 403
 
 
 def req(url, headers=None, timeout=30):
