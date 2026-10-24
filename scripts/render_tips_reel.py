@@ -37,10 +37,14 @@ ORDINAL = re.compile(r"^[وف]?(أولا|اولا|أولاً|ثانيا|ثاني
 UA = {"User-Agent": "Mozilla/5.0 (AOA reels bot)"}
 BAN = ("monkey", "ape", "animal", "dog", "cat", "bird", "wildlife", "zoo", "quran", "koran", "mosque", "prayer", "islam",
        "muslim", "religion", "church", "bible", "christian", "cross", "god", "pray", "bikini", "lingerie", "alcohol", "beer",
-       "wine", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "chinese", "japanese", "korean", "calligraphy", "kanji", "hieroglyph", "newspaper", "graffiti", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
+       "wine", "christmas", "xmas", "santa", "gift", "gifts", "present", "holiday", "costume", "robe", "kimono",
+       "asian", "asia", "china", "japan", "india", "hindu", "buddha", "buddhism", "temple", "dollar", "dollars", "usd", "parchment",
+       "antique", "vintage", "grunge", "texture", "background", "wallpaper", "illustration", "cartoon", "vector", "sign", "signs", "signage", "billboard", "banner", "poster", "advertisement", "logo", "brand", "chinese", "japanese", "korean", "calligraphy", "kanji", "hieroglyph", "newspaper", "graffiti", "apes", "monkeys", "cats", "dogs", "birds", "animals", "religious", "ramadan", "halloween", "zombie", "skull", "weapon", "gun", "war", "blood", "flag", "politic")
 GENERIC = {"worry": ["worried man", "stress woman"], "tension": ["stress business", "confused couple"],
            "neutral": ["real estate agent", "apartment building"], "happy": ["happy couple home", "family home"],
            "relief": ["handshake business", "smiling couple"]}
+HUMAN = {"man", "men", "woman", "women", "person", "people", "girl", "boy", "businessman", "businesswoman", "couple",
+         "family", "hand", "hands", "lady", "guy", "male", "female", "adult", "worker", "father", "mother", "child", "human"}
 STOP = {"the", "and", "with", "for", "from", "into", "at", "of", "on", "in", "a", "an", "his", "her", "their", "looking", "showing"}
 ROLE_AR = {"asker": "المشتري", "expert": "الخبير", "witness": "تجربة", "narrator": ""}
 MOOD_GRADE = {
@@ -238,6 +242,7 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
     except Exception as e:
         log("pixabay photo failed", query, e); pics = []
     words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2 and w not in STOP]
+    want_person = bool(PERSON.search(query) or re.search(r"\b(couple|family|people|hands?|clerk|notary|lawyer|tenant)\b", query, re.I))
 
     def score(h):
         toks = re.findall(r"[a-z]+", h.get("tags", "").lower())
@@ -247,6 +252,8 @@ def pixabay_pick(query, key, used, want, workdir, idx, avoid=()):
         sig = (h.get("user_id"), h.get("tags"))
         toks = set(re.findall(r"[a-z]+", h.get("tags", "").lower()))
         noise = set() if MONEY_Q.search(query) else OFFICE_NOISE
+        if want_person and not toks.intersection(HUMAN):
+            return False                      # the query asks for a person: no empty paper / object shots
         return (h["id"] not in used and sig not in used and not toks.intersection(BAN) and not toks.intersection(avoid)
                 and not toks.intersection(noise))
 
@@ -531,7 +538,8 @@ def main():
     for i, s in enumerate(scenes):
         got = None
         g = (voices.get(s.get("speaker") or "narrator") or {}).get("gender") if mode == "dialogue" else None
-        qs = [match_gender(q, g) for q in concept_queries(s.get("line"))[:2] + [s.get("visual"), s.get("visual_alt")] if q]
+        # the montage scenario (validated by the owner in the PDF) decides the shot; spoken-term concepts are only a fallback
+        qs = [match_gender(q, g) for q in [s.get("visual"), s.get("visual_alt")] + concept_queries(s.get("line"))[:2] if q]
         avoid = OTHER_SEX.get(g, ()) if any(PERSON.search(x or "") for x in qs) else ()
         for q in qs + GENERIC.get(s.get("mood") or "neutral", GENERIC["neutral"]):
             got = pixabay_pick(q, pkey, used, s["dur"], a.work, i, avoid)
