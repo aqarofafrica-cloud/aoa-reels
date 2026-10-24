@@ -19,7 +19,10 @@ def req(url, headers=None, timeout=30):
         with urllib.request.urlopen(r, timeout=timeout) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        try:
+            return e.code, e.read()
+        except Exception:
+            return e.code, b""
     except Exception:
         return 0, b""
 
@@ -52,8 +55,8 @@ def main():
             lines.append(f"- ElevenLabs ما جاوبش (الرمز {code}). الصوت ديال الريلز ممكن يوقف.")
     key = os.environ.get("COVERR_API_KEY", "")
     if key:
-        code, _ = req("https://api.coverr.co/videos?query=office&page_size=1", {"Authorization": "Bearer " + key})
-        if code in (401, 403):
+        code, body = req("https://api.coverr.co/videos?query=office&page_size=1", {"Authorization": "Bearer " + key})
+        if code in (401, 403) and b"limit" not in (body or b"").lower():
             lines.append(f"- مفتاح Coverr ما خدامش (الرمز {code}).")
     key = os.environ.get("PIXABAY_API_KEY", "")
     if key:

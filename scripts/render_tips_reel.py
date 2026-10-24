@@ -334,7 +334,7 @@ def pexels_pick(query, key, used, want, workdir, idx, avoid=()):
     return None
 
 
-COVERR_BUDGET = [30]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
+COVERR_BUDGET = [18]   # demo key: 50 requests/hour, keep a margin for a second reel in the same hour
 # Coverr also hosts AI / abstract renders and lifestyle clips: never for an advice lesson
 COVERR_BAN = {"ai", "generated", "abstract", "render", "rendering", "cgi", "animation", "animated", "3d", "egg", "sculpture",
               "art", "artistic", "surreal", "fantasy", "neon", "hologram", "futuristic", "skateboard", "skate", "selfie",
@@ -548,7 +548,7 @@ def vision_visual(s, qs, keys, used, workdir, idx, avoid):
     for k in range(0, min(len(pool), 6), 2):
         cands = []
         for j, q in enumerate(pool[k:k + 2]):
-            cands += (coverr_candidates(q, ckey, used, s["dur"], avoid) if k + j < 3 else []) \
+            cands += (coverr_candidates(q, ckey, used, s["dur"], avoid) if k + j < 2 else []) \
                 + pixabay_candidates(q, pkey, used, s["dur"], avoid)
         ids, uniq = set(), []
         for c in cands:
